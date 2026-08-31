@@ -4,5 +4,6 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [tailwindcss(), react()],
+  base: '/amaro-iphone/',
   server: { proxy: { '/v1': 'http://localhost:3001' } },
 })
