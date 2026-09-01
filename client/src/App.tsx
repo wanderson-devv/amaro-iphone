@@ -685,10 +685,11 @@ async function exportAllToExcel() {
     api.serviceOrders.list(),
   ])
 
+  const customerMap = new Map(customers.map(c => [c.uuid, c.name]))
   const salesRows = sales.filter(s => s.status === 'completed').map(s => ({
     Data: s.createdAt.split('T')[0],
-    Cliente: s.customerName || '-',
-    Itens: s.items.map(i => `${i.productName} x${i.quantity}`).join(', '),
+    Cliente: customerMap.get(s.customerUuid || '') || '-',
+    Itens: s.items.map(i => `${i.name} x${i.quantity}`).join(', '),
     FormaPagamento: s.paymentMethod,
     Subtotal: s.subtotal,
     Desconto: s.discount,
@@ -730,7 +731,7 @@ async function exportAllToExcel() {
     Documento: c.document,
     Telefone: c.phone,
     Email: c.email || '-',
-    Endereco: c.address || '-',
+    Notas: c.notes || '-',
   }))
   const wsCustomers = XLSX.utils.json_to_sheet(customerRows)
   XLSX.utils.book_append_sheet(wb, wsCustomers, 'Clientes')
@@ -742,7 +743,7 @@ async function exportAllToExcel() {
     Modelo: o.model || '-',
     Problema: o.reportedIssue,
     Status: o.status,
-    Tecnico: o.technico || '-',
+    Tecnico: o.technician || '-',
     Total: o.total,
     Previsao: o.expectedDelivery || '-',
   }))
