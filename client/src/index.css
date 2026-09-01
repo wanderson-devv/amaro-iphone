@@ -242,7 +242,7 @@ textarea { min-height: 67px; resize: vertical; }
 .stock-entry input { min-width: 0; min-height: 30px; padding: 5px; font-size: 11px; }
 .stock-entry button { width: 32px; border: 0; border-radius: 5px; color: white; background: linear-gradient(135deg, #1768ac, #1460a0); transition: background var(--transition), transform var(--transition); }
 .stock-entry button:hover { background: linear-gradient(135deg, #1460a0, #0f528a); transform: translateY(-1px); }
-.delete-product { width: 30px; height: 30px; display: grid; place-items: center; flex: none; padding: 0; border: 1px solid #f0d4d5; border-radius: 5px; color: #b74349; background: #fff7f7; transition: background var(--transition), color var(--transition), transform var(--transition); }
+.delete-product { width: 30px; height: 30px; display: grid; place-items: center; flex: none; padding: 0; border: 1px solid #f0d4d5; border-radius: 5px; color: #b74349; background: #fff7f7; transition: background var(--transition), color var(--transition), transform var(--transition); pointer-events: auto; z-index: 1; }
 .delete-product:hover { color: white; background: #bc4a50; border-color: #bc4a50; transform: translateY(-1px); }
 .edit-product { width: 30px; height: 30px; display: grid; place-items: center; flex: none; padding: 0; border: 1px solid #c9dceb; border-radius: 5px; color: #276797; background: #f4f9fd; transition: background var(--transition), color var(--transition), transform var(--transition); }
 .edit-product:hover { color: white; background: #276797; transform: translateY(-1px); }

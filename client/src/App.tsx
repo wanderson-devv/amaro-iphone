@@ -4,7 +4,7 @@ import { api } from './services/api'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { Login } from './pages/Login'
 import type { FinancialEntry, FinancialEntryType, PaymentMethod, Product, PurchaseOrder, PurchaseOrderStatus, ServiceOrder, ServiceOrderStatus } from './lib/types'
-import { completeSale, consumePartInServiceOrder, createCustomer, createFinancialEntry, createProduct, createServiceOrder, createSupplier, cancelFinancialEntry, deleteProduct, deleteSupplier, payFinancialEntry, updateProduct, updateServiceOrderStatus } from './services/operations'
+import { completeSale, consumePartInServiceOrder, createCustomer, createFinancialEntry, createProduct, createServiceOrder, createSupplier, cancelFinancialEntry, deleteProduct, deleteSupplier, payFinancialEntry, adjustStock, updateProduct, updateServiceOrderStatus } from './services/operations'
 
 type Page = 'dashboard' | 'pdv' | 'orders' | 'customers' | 'products' | 'stock' | 'financial' | 'purchases' | 'guarantees' | 'reports' | 'settings'
 type CartLine = { product: Product; quantity: number }
@@ -291,6 +291,8 @@ function ProductsPage() {
     event.preventDefault(); const data = new FormData(event.currentTarget); const name = String(data.get('name') ?? '').trim()
     if (!name) return
     await createProduct({ code: String(data.get('code') ?? '').trim() || `PRD-${Date.now()}`, sku: String(data.get('sku') ?? ''), barcode: String(data.get('barcode') ?? ''), name, category: String(data.get('category') ?? ''), cost: Number(data.get('cost') ?? 0), salePrice: Number(data.get('price') ?? 0), minStock: Number(data.get('minimum') ?? 0), unit: String(data.get('unit') ?? 'UN') })
+    const initialStock = Number(data.get('stock') ?? 0)
+    if (initialStock > 0) { const products = await api.products.list(); const last = products[products.length - 1]; if (last) await adjustStock(last.uuid, initialStock, 'Estoque inicial') }
     reload(); event.currentTarget.reset(); setNotice('Produto criado.')
   }
   return (
@@ -302,7 +304,8 @@ function ProductsPage() {
             <label>Nome<input name="name" required placeholder="Ex.: Tela iPhone 13" /></label>
             <div className="form-row"><label>Codigo interno<input name="code" placeholder="Gerado se vazio" /></label><label>SKU<input name="sku" /></label></div>
             <div className="form-row"><label>Custo<input name="cost" type="number" min="0" step="0.01" defaultValue="0" /></label><label>Preco de venda<input name="price" type="number" min="0" step="0.01" defaultValue="0" /></label></div>
-            <div className="form-row"><label>Estoque minimo<input name="minimum" type="number" min="0" step="1" defaultValue="0" /></label><label>Unidade<select name="unit"><option>UN</option><option>PC</option><option>MT</option></select></label></div>
+            <div className="form-row"><label>Estoque minimo<input name="minimum" type="number" min="0" step="1" defaultValue="0" /></label><label>Estoque inicial<input name="stock" type="number" min="0" step="1" defaultValue="0" /></label></div>
+            <div className="form-row"><label>Unidade<select name="unit"><option>UN</option><option>PC</option><option>MT</option></select></label><label>Codigo de barras<input name="barcode" /></label></div>
             <button className="primary-button" type="submit"><Plus size={16} />Cadastrar produto</button>
           </form>
         </article>
@@ -315,7 +318,7 @@ function ProductsPage() {
                 <div className="grow"><strong>{p.name}</strong><small>{p.code} · Venda: {currency(p.salePrice)}</small></div>
                 <b className={p.stockQty <= p.minStock ? 'danger' : ''}>{p.stockQty} {p.unit}</b>
                 <button className="edit-product" onClick={() => setEditingProduct(p)}><Pencil size={15} /></button>
-                <button className="delete-product" onClick={async () => { if (window.confirm(`Excluir "${p.name}"?`)) { await deleteProduct(p.uuid); reload(); setNotice('Produto removido.') } }}><Trash2 size={16} /></button>
+                <button className="delete-product" onClick={async () => { if (window.confirm(`Excluir "${p.name}"?`)) { try { await deleteProduct(p.uuid); reload(); setNotice('Produto removido.') } catch (e: any) { setNotice('Erro ao excluir: ' + (e.message || 'desconhecido')) } } }}><Trash2 size={16} /></button>
               </div>
             ))}
             {!products.length && <Empty title="Catalogo vazio" text="Cadastre produtos." />}
