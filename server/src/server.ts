@@ -16,7 +16,7 @@ const pool = new pg.Pool({
   ssl: process.env.DATABASE_URL?.includes('supabase') ? { rejectUnauthorized: false } : undefined,
 })
 
-await app.register(cors, { origin: process.env.CORS_ORIGIN?.split(',') ?? true, credentials: true })
+await app.register(cors, { origin: ['https://wanderson-devv.github.io', 'http://localhost:5173', 'http://localhost:3001'], credentials: true, methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization'] })
 await app.register(jwt, { secret: process.env.JWT_SECRET ?? 'change-this-in-production' })
 
 async function requireAuth(request: any, reply: any) {
