@@ -13,7 +13,8 @@ export function setAuthToken(token: string | null) {
 export function getAuthToken(): string | null { return authToken }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const headers: Record<string, string> = {}
+  if (body) headers['Content-Type'] = 'application/json'
   if (authToken) headers['Authorization'] = `Bearer ${authToken}`
   const res = await fetch(`${API_URL}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined })
   if (res.status === 401) { setAuthToken(null); window.location.reload(); throw new Error('Sessao expirada.') }
