@@ -4,7 +4,7 @@ import { api } from './services/api'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { Login } from './pages/Login'
 import type { FinancialEntry, FinancialEntryType, PaymentMethod, Product, PurchaseOrder, PurchaseOrderStatus, ServiceOrder, ServiceOrderStatus } from './lib/types'
-import { completeSale, consumePartInServiceOrder, createCustomer, createFinancialEntry, createProduct, createServiceOrder, createSupplier, cancelFinancialEntry, deleteProduct, deleteSupplier, payFinancialEntry, seedDemoData, updateProduct, updateServiceOrderStatus } from './services/operations'
+import { completeSale, consumePartInServiceOrder, createCustomer, createFinancialEntry, createProduct, createServiceOrder, createSupplier, cancelFinancialEntry, deleteProduct, deleteSupplier, payFinancialEntry, updateProduct, updateServiceOrderStatus } from './services/operations'
 
 type Page = 'dashboard' | 'pdv' | 'orders' | 'customers' | 'products' | 'stock' | 'financial' | 'purchases' | 'guarantees' | 'reports' | 'settings'
 type CartLine = { product: Product; quantity: number }
@@ -675,11 +675,9 @@ function ReportsPage() {
 
 function SettingsPage({ onNavigate }: { onNavigate: (page: Page) => void }) {
   const [notice, setNotice] = useState('')
-  const loadDemo = async () => { await seedDemoData(); setNotice('Dados DEMO carregados.') }
   return (
     <>
       <div className="settings-grid">
-        <article className="panel settings-card"><span className="eyebrow">DEMO</span><h2>Dados de demonstracao</h2><p>Carrega clientes, produtos e OS de exemplo.</p><button className="secondary-button" onClick={loadDemo}>Carregar dados DEMO</button></article>
         <article className="panel settings-card"><span className="eyebrow">NAVEGACAO</span><h2>Modulos do sistema</h2><p>Acesse todas as funcionalidades pelo menu lateral.</p><button className="secondary-button" onClick={() => onNavigate('dashboard')}>Ir para Dashboard</button></article>
         <article className="panel settings-card"><span className="eyebrow">SOBRE</span><h2>Amaro Iphone</h2><p>Sistema de gestao online para loja e assistencia tecnica.</p></article>
       </div>
