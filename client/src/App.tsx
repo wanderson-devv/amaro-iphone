@@ -673,11 +673,104 @@ function ReportsPage() {
   )
 }
 
+async function exportAllToExcel() {
+  const XLSX = await import('xlsx')
+  const wb = XLSX.utils.book_new()
+
+  const [sales, products, entries, customers, orders] = await Promise.all([
+    api.sales.list(),
+    api.products.list(),
+    api.financial.list(),
+    api.customers.list(),
+    api.serviceOrders.list(),
+  ])
+
+  const salesRows = sales.filter(s => s.status === 'completed').map(s => ({
+    Data: s.createdAt.split('T')[0],
+    Cliente: s.customerName || '-',
+    Itens: s.items.map(i => `${i.productName} x${i.quantity}`).join(', '),
+    FormaPagamento: s.paymentMethod,
+    Subtotal: s.subtotal,
+    Desconto: s.discount,
+    Acrescimo: s.surcharge,
+    Total: s.total,
+  }))
+  const wsSales = XLSX.utils.json_to_sheet(salesRows)
+  XLSX.utils.book_append_sheet(wb, wsSales, 'Vendas')
+
+  const stockRows = products.map(p => ({
+    Codigo: p.code,
+    SKU: p.sku,
+    Nome: p.name,
+    Categoria: p.category,
+    PrecoCusto: p.cost,
+    PrecoVenda: p.salePrice,
+    Estoque: p.stockQty,
+    EstoqueMinimo: p.minStock,
+    Unidade: p.unit,
+  }))
+  const wsStock = XLSX.utils.json_to_sheet(stockRows)
+  XLSX.utils.book_append_sheet(wb, wsStock, 'Estoque')
+
+  const financialRows = entries.map(e => ({
+    Tipo: e.type === 'receivable' ? 'A Receber' : 'A Pagar',
+    Descricao: e.description,
+    Valor: e.amount,
+    Pago: e.paidAmount,
+    Saldo: e.amount - e.paidAmount,
+    Vencimento: e.dueDate,
+    Status: e.status,
+    FormaPagamento: e.paymentMethod || '-',
+  }))
+  const wsFinancial = XLSX.utils.json_to_sheet(financialRows)
+  XLSX.utils.book_append_sheet(wb, wsFinancial, 'Financeiro')
+
+  const customerRows = customers.map(c => ({
+    Nome: c.name,
+    Documento: c.document,
+    Telefone: c.phone,
+    Email: c.email || '-',
+    Endereco: c.address || '-',
+  }))
+  const wsCustomers = XLSX.utils.json_to_sheet(customerRows)
+  XLSX.utils.book_append_sheet(wb, wsCustomers, 'Clientes')
+
+  const orderRows = orders.map(o => ({
+    Numero: `OS-${String(o.number).padStart(4, '0')}`,
+    Equipamento: o.equipment,
+    Marca: o.brand || '-',
+    Modelo: o.model || '-',
+    Problema: o.reportedIssue,
+    Status: o.status,
+    Tecnico: o.technico || '-',
+    Total: o.total,
+    Previsao: o.expectedDelivery || '-',
+  }))
+  const wsOrders = XLSX.utils.json_to_sheet(orderRows)
+  XLSX.utils.book_append_sheet(wb, wsOrders, 'Ordens de Servico')
+
+  const now = new Date().toISOString().split('T')[0]
+  XLSX.writeFile(wb, `Amaro_Iphone_Relatorios_${now}.xlsx`)
+}
+
 function SettingsPage({ onNavigate }: { onNavigate: (page: Page) => void }) {
   const [notice, setNotice] = useState('')
+  const [exporting, setExporting] = useState(false)
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      await exportAllToExcel()
+      setNotice('Relatorios exportados com sucesso!')
+    } catch {
+      setNotice('Erro ao exportar relatorios.')
+    } finally {
+      setExporting(false)
+    }
+  }
   return (
     <>
       <div className="settings-grid">
+        <article className="panel settings-card"><span className="eyebrow">RELATORIOS</span><h2>Exportar dados</h2><p>Baixe todas as planilhas (Vendas, Estoque, Financeiro, Clientes, OS) em um arquivo Excel.</p><button className="secondary-button" onClick={handleExport} disabled={exporting}>{exporting ? 'Exportando...' : 'Baixar relatorios em Excel'}</button></article>
         <article className="panel settings-card"><span className="eyebrow">NAVEGACAO</span><h2>Modulos do sistema</h2><p>Acesse todas as funcionalidades pelo menu lateral.</p><button className="secondary-button" onClick={() => onNavigate('dashboard')}>Ir para Dashboard</button></article>
         <article className="panel settings-card"><span className="eyebrow">SOBRE</span><h2>Amaro Iphone</h2><p>Sistema de gestao online para loja e assistencia tecnica.</p></article>
       </div>
