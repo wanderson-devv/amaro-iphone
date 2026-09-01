@@ -11,7 +11,10 @@ declare module '@fastify/jwt' {
 }
 
 const app = Fastify({ logger: true })
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL?.includes('supabase') ? { rejectUnauthorized: false } : undefined,
+})
 
 await app.register(cors, { origin: process.env.CORS_ORIGIN?.split(',') ?? true, credentials: true })
 await app.register(jwt, { secret: process.env.JWT_SECRET ?? 'change-this-in-production' })
