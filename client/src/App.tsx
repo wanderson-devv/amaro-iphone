@@ -391,12 +391,7 @@ function ServiceOrdersPage() {
                 <label>E-mail<input name="newEmail" placeholder="Opcional" /></label>
               </>
             ) : (
-              <>
-                <div className="form-row" style={{ alignItems: 'center' }}>
-                  <label style={{ flex: 1 }}>Cliente<select name="customerUuid" required><option value="">Selecione</option>{customers.map((c) => <option key={c.uuid} value={c.uuid}>{c.name}</option>)}</select></label>
-                  <button type="button" className="secondary-button" style={{ marginTop: 6, padding: '6px 12px', fontSize: 11, whiteSpace: 'nowrap' }} onClick={() => setNewCustomer(true)}><Plus size={14} />Novo cliente</button>
-                </div>
-              </>
+              <label>Cliente<div className="form-row" style={{ alignItems: 'center' }}><select name="customerUuid" required style={{ flex: 1 }}><option value="">Selecione</option>{customers.map((c) => <option key={c.uuid} value={c.uuid}>{c.name}</option>)}</select><button type="button" className="secondary-button" style={{ padding: '6px 12px', fontSize: 11, whiteSpace: 'nowrap', flex: 'none' }} onClick={() => setNewCustomer(true)}><Plus size={14} />Novo cliente</button></div></label>
             )}
             <label>Equipamento<input name="equipment" required placeholder="Ex.: iPhone 13" /></label>
             <div className="form-row"><label>Marca<input name="brand" /></label><label>Modelo<input name="model" /></label></div>
