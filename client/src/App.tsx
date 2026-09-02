@@ -357,13 +357,22 @@ function EditProductModal({ product, onClose, onMessage, onReload }: { product: 
 }
 
 function ServiceOrdersPage() {
-  const { data: customers } = useApiData(() => api.customers.list(), [])
+  const { data: customers, reload: reloadCustomers } = useApiData(() => api.customers.list(), [])
   const { data: orders, reload } = useApiData(() => api.serviceOrders.list(), [])
   const { data: products } = useApiData(() => api.products.list(), [])
   const [selected, setSelected] = useState<ServiceOrder | undefined>()
   const [notice, setNotice] = useState('')
+  const [newCustomer, setNewCustomer] = useState(false)
   const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); const data = new FormData(event.currentTarget); const customerUuid = String(data.get('customerUuid') ?? '')
+    event.preventDefault(); const data = new FormData(event.currentTarget)
+    let customerUuid = String(data.get('customerUuid') ?? '')
+    if (newCustomer) {
+      const name = String(data.get('newName') ?? '').trim()
+      if (!name) return setNotice('Informe o nome do cliente.')
+      const customer = await createCustomer({ name, document: String(data.get('newDocument') ?? '') || undefined, phone: String(data.get('newPhone') ?? '') || undefined, email: String(data.get('newEmail') ?? '') || undefined, notes: undefined })
+      customerUuid = customer.uuid
+      reloadCustomers()
+    }
     if (!customerUuid) return setNotice('Selecione o cliente.')
     const order = await createServiceOrder({ customerUuid, equipment: String(data.get('equipment') ?? ''), brand: String(data.get('brand') ?? ''), model: String(data.get('model') ?? ''), reportedIssue: String(data.get('issue') ?? ''), expectedDelivery: String(data.get('expectedDelivery') ?? '') || undefined, technician: String(data.get('technician') ?? '') })
     reload(); event.currentTarget.reset(); setSelected(order); setNotice(`OS #${String(order.number).padStart(4, '0')} aberta.`)
@@ -374,7 +383,21 @@ function ServiceOrdersPage() {
         <article className="panel form-panel compact-form">
           <div className="panel-header"><div><span className="eyebrow">RECEPCAO</span><h2>Abrir OS</h2></div></div>
           <form onSubmit={submit}>
-            <label>Cliente<select name="customerUuid" required><option value="">Selecione</option>{customers.map((c) => <option key={c.uuid} value={c.uuid}>{c.name}</option>)}</select></label>
+            {newCustomer ? (
+              <>
+                <div className="form-row" style={{ alignItems: 'center' }}><span className="eyebrow">CADASTRO RAPIDO</span><button type="button" className="secondary-button" style={{ marginLeft: 'auto', padding: '4px 10px', fontSize: 10 }} onClick={() => setNewCustomer(false)}>Voltar</button></div>
+                <label>Nome completo<input name="newName" required placeholder="Nome ou razao social" /></label>
+                <div className="form-row"><label>CPF / CNPJ<input name="newDocument" placeholder="Opcional" /></label><label>Telefone<input name="newPhone" placeholder="(00) 00000-0000" /></label></div>
+                <label>E-mail<input name="newEmail" placeholder="Opcional" /></label>
+              </>
+            ) : (
+              <>
+                <div className="form-row" style={{ alignItems: 'center' }}>
+                  <label style={{ flex: 1 }}>Cliente<select name="customerUuid" required><option value="">Selecione</option>{customers.map((c) => <option key={c.uuid} value={c.uuid}>{c.name}</option>)}</select></label>
+                  <button type="button" className="secondary-button" style={{ marginTop: 6, padding: '6px 12px', fontSize: 11, whiteSpace: 'nowrap' }} onClick={() => setNewCustomer(true)}><Plus size={14} />Novo cliente</button>
+                </div>
+              </>
+            )}
             <label>Equipamento<input name="equipment" required placeholder="Ex.: iPhone 13" /></label>
             <div className="form-row"><label>Marca<input name="brand" /></label><label>Modelo<input name="model" /></label></div>
             <label>Defeito<textarea name="issue" required placeholder="Descreva o defeito" /></label>
