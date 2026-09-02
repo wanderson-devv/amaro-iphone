@@ -148,6 +148,27 @@ app.post<{ Body: { items: Array<{ productUuid: string; quantity: number }>; cust
   } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() }
 })
 
+app.post<{ Params: { uuid: string } }>('/v1/sales/:uuid/cancel', { preHandler: requireAuth }, async (request) => {
+  const { uuid } = request.params
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const saleRes = await client.query('SELECT * FROM sales WHERE uuid=$1 AND deleted_at IS NULL FOR UPDATE', [uuid])
+    if (!saleRes.rows.length) throw new Error('Venda nao encontrada.')
+    const sale = saleRes.rows[0]
+    if (sale.status === 'cancelled') throw new Error('Venda ja foi cancelada.')
+    for (const item of sale.items) {
+      await client.query('UPDATE products SET stock_qty = stock_qty + $1, updated_at=NOW() WHERE uuid=$2', [item.quantity, item.productUuid])
+      await client.query('INSERT INTO stock_movements(product_uuid, type, quantity, previous_qty, resulting_qty, reference_type, reference_uuid, created_by) VALUES($1,\'cancellation\',$2,$3,$4,\'sale\',$5,$6)', [item.productUuid, item.quantity, 0, 0, uuid, request.user.sub])
+    }
+    await client.query('UPDATE sales SET status=\'cancelled\', updated_at=NOW() WHERE uuid=$1', [uuid])
+    await client.query('DELETE FROM cash_movements WHERE reference_uuid=$1', [uuid])
+    await client.query('COMMIT')
+    const updated = await pool.query('SELECT * FROM sales WHERE uuid=$1', [uuid])
+    return mapSale(updated.rows[0])
+  } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() }
+})
+
 // Service Orders
 app.get('/v1/service-orders', { preHandler: requireAuth }, async () => {
   const result = await pool.query('SELECT * FROM service_orders WHERE deleted_at IS NULL ORDER BY created_at DESC')

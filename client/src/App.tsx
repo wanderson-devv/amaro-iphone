@@ -94,7 +94,7 @@ function App() {
 }
 
 function Dashboard({ onNavigate }: { onNavigate: (page: Page) => void }) {
-  const { data: sales } = useApiData(() => api.sales.list(), [])
+  const { data: sales, reload } = useApiData(() => api.sales.list(), [])
   const { data: orders } = useApiData(() => api.serviceOrders.list(), [])
   const { data: products } = useApiData(() => api.products.list(), [])
   const [periodStart, setPeriodStart] = useState(today())
@@ -147,6 +147,7 @@ function Dashboard({ onNavigate }: { onNavigate: (page: Page) => void }) {
               <span className="document-mark">#{String(sale.number).padStart(4, '0')}</span>
               <div><strong>Venda concluida</strong><small>{formatDate(sale.createdAt)} · {sale.paymentMethod}</small></div>
               <b>{currency(sale.total)}</b>
+              <button className="delete-product" title="Cancelar venda" onClick={async () => { if (window.confirm(`Cancelar venda #${String(sale.number).padStart(4, '0')}? O estoque sera devolvido.`)) { await api.sales.cancel(sale.uuid); reload() } }}><X size={15} /></button>
             </div>
           ))}
           {salesForDay.length === 0 && <Empty title="Nenhuma venda neste periodo" text="Escolha as datas ou conclua uma venda no PDV." />}

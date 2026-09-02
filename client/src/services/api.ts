@@ -47,6 +47,7 @@ export const api = {
     list: () => request<Sale[]>('GET', '/v1/sales'),
     get: (uuid: string) => request<Sale>('GET', `/v1/sales/${uuid}`),
     create: (data: { items: Array<{ productUuid: string; quantity: number }>; customerUuid?: string; discount: number; surcharge: number; paymentMethod: string }) => request<Sale>('POST', '/v1/sales', data),
+    cancel: (uuid: string) => request<Sale>('POST', `/v1/sales/${uuid}/cancel`),
   },
   serviceOrders: {
     list: () => request<ServiceOrder[]>('GET', '/v1/service-orders'),
