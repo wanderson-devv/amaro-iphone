@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, type FormEvent } from 'react'
-import { Activity, AlertTriangle, BadgeDollarSign, Banknote, Box, Boxes, CalendarDays, CheckCircle, CreditCard, FileText, Gauge, LayoutDashboard, Menu, Pencil, Plus, Search, Settings, ShoppingCart, Sparkles, Trash2, Truck, Users, Wrench, X } from 'lucide-react'
+import { Activity, AlertTriangle, BadgeDollarSign, Banknote, Box, Boxes, CalendarDays, CheckCircle, CreditCard, FileText, Gauge, LayoutDashboard, Menu, Pencil, Plus, Search, Settings, ShoppingCart, Sparkles, Trash2, Truck, Users, Wrench, X, Download } from 'lucide-react'
 import { api } from './services/api'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { Login } from './pages/Login'
@@ -14,6 +14,129 @@ const currency = (value: number) => money.format(value)
 const formatDate = (value: string) => new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value))
 const dayKey = (value: Date | string) => { const d = typeof value === 'string' ? new Date(value) : value; return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 const today = () => dayKey(new Date())
+
+async function generateServiceOrderPDF(order: ServiceOrder) {
+  const { jsPDF } = await import('jspdf')
+  const doc = new jsPDF()
+  const pageWidth = doc.internal.pageSize.getWidth()
+  const margin = 20
+  let y = 20
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(16)
+  doc.text('AMARO IPHONE', margin, y)
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'normal')
+  doc.text('Centro de Assistencia Tecnica', margin, y + 6)
+  y += 16
+
+  doc.setDrawColor(0)
+  doc.setLineWidth(0.5)
+  doc.line(margin, y, pageWidth - margin, y)
+  y += 10
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(14)
+  doc.text(`ORDEM DE SERVICO #${String(order.number).padStart(4, '0')}`, margin, y)
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'normal')
+  const statusText = `Status: ${order.status}`
+  doc.text(statusText, pageWidth - margin - doc.getTextWidth(statusText), y)
+  y += 8
+
+  const createdAt = new Date(order.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  doc.text(`Data de abertura: ${createdAt}`, margin, y)
+  y += 12
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(11)
+  doc.text('CLIENTE', margin, y)
+  y += 6
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(10)
+  doc.text(`Nome: ${order.customerName || 'Nao informado'}`, margin, y)
+  y += 6
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(11)
+  doc.text('EQUIPAMENTO', margin, y)
+  y += 6
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(10)
+  doc.text(`Equipamento: ${order.equipment}`, margin, y)
+  y += 6
+  if (order.brand) { doc.text(`Marca: ${order.brand}`, margin, y); y += 6 }
+  if (order.model) { doc.text(`Modelo: ${order.model}`, margin, y); y += 6 }
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(11)
+  doc.text('DEFEITO RELATADO', margin, y)
+  y += 6
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(10)
+  const issueLines = doc.splitTextToSize(order.reportedIssue, pageWidth - margin * 2)
+  doc.text(issueLines, margin, y)
+  y += issueLines.length * 5 + 6
+
+  if (order.technician) {
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(11)
+    doc.text('TECNICO', margin, y)
+    y += 6
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    doc.text(order.technician, margin, y)
+    y += 10
+  }
+
+  if (order.items.length > 0) {
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(11)
+    doc.text('PECAS UTILIZADAS', margin, y)
+    y += 8
+
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Item', margin, y)
+    doc.text('Qtd', margin + 90, y)
+    doc.text('Unit.', margin + 110, y)
+    doc.text('Total', margin + 140, y)
+    y += 5
+    doc.line(margin, y, pageWidth - margin, y)
+    y += 5
+
+    doc.setFont('helvetica', 'normal')
+    for (const item of order.items) {
+      doc.text(item.name, margin, y)
+      doc.text(String(item.quantity), margin + 90, y)
+      doc.text(currency(item.unitPrice), margin + 110, y)
+      doc.text(currency(item.total), margin + 140, y)
+      y += 5
+    }
+    doc.line(margin, y, pageWidth - margin, y)
+    y += 8
+  }
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(12)
+  doc.text(`TOTAL: ${currency(order.total)}`, margin, y)
+  y += 10
+
+  doc.setFontSize(9)
+  doc.setFont('helvetica', 'normal')
+  doc.text(`Garantia: ${order.warrantyDays} dias a partir da entrega.`, margin, y)
+  y += 15
+
+  doc.setDrawColor(150)
+  doc.setLineWidth(0.3)
+  doc.line(margin, y, margin + 60, y)
+  y += 5
+  doc.text('Assinatura do cliente', margin, y)
+  doc.line(pageWidth - margin - 60, y - 5, pageWidth - margin, y - 5)
+  doc.text('Assinatura tecnico', pageWidth - margin - 60, y)
+
+  doc.save(`OS-${String(order.number).padStart(4, '0')}.pdf`)
+}
 const daysAgo = (days: number) => { const d = new Date(); d.setDate(d.getDate() - days + 1); return dayKey(d) }
 
 const pageMeta: Record<Page, { label: string; icon: typeof LayoutDashboard }> = {
@@ -424,6 +547,7 @@ function OrderDetail({ order, products, onMessage, onReload }: { order: ServiceO
   return (
     <div className="detail-content">
       <div><span className="eyebrow">OS #{String(order.number).padStart(4, '0')}</span><h2>{order.equipment}</h2><p>{order.reportedIssue}</p></div>
+      <button className="secondary-button" onClick={() => void generateServiceOrderPDF(order)}><Download size={16} />Baixar PDF</button>
       <label>Status<select value={order.status} onChange={(e) => void changeStatus(e.target.value as ServiceOrderStatus)}>{['Entrada', 'Diagnostico', 'Aguardando aprovacao', 'Aguardando peca', 'Em reparo', 'Testes', 'Pronto para entrega', 'Entregue'].map((s) => <option key={s}>{s}</option>)}</select></label>
       <div className="detail-meta"><span>Tecnico: <b>{order.technician || 'Nao atribuido'}</b></span><span>Garantia: <b>{order.warrantyDays} dias</b></span><span>Total: <b>{currency(order.total)}</b></span></div>
       <div className="parts-box">
