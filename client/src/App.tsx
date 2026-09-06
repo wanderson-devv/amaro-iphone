@@ -546,11 +546,44 @@ function FinancialPage() {
 
 function PurchasesPage() {
   const { data: suppliers, reload: reloadSup } = useApiData(() => api.suppliers.list(), [])
-  const { data: orders } = useApiData(() => api.purchaseOrders.list(), [])
+  const { data: orders, reload: reloadOrders } = useApiData(() => api.purchaseOrders.list(), [])
+  const { data: products } = useApiData(() => api.products.list(), [])
   const [selected, setSelected] = useState<PurchaseOrder | undefined>()
   const [notice, setNotice] = useState('')
   const [filter, setFilter] = useState<'all' | PurchaseOrderStatus>('all')
+  const [showNewOrder, setShowNewOrder] = useState(false)
+  const [orderItems, setOrderItems] = useState<Array<{ productUuid: string; name: string; quantity: number; unitCost: number }>>([])
+  const [selectedSupplier, setSelectedSupplier] = useState('')
+  const [expectedDelivery, setExpectedDelivery] = useState('')
+  const [orderNotes, setOrderNotes] = useState('')
   const filtered = filter === 'all' ? orders : orders.filter((o) => o.status === filter)
+  const draftOrders = orders.filter((o) => o.status === 'draft')
+  const orderedOrders = orders.filter((o) => o.status === 'ordered')
+  const partialOrders = orders.filter((o) => o.status === 'partial')
+  const receivedOrders = orders.filter((o) => o.status === 'received')
+  const totalPending = draftOrders.reduce((s, o) => s + o.total, 0) + orderedOrders.reduce((s, o) => s + o.total, 0) + partialOrders.reduce((s, o) => s + o.total, 0)
+  const totalReceived = receivedOrders.reduce((s, o) => s + o.total, 0)
+  const totalAll = orders.reduce((s, o) => s + o.total, 0)
+  const orderItemTotal = orderItems.reduce((s, i) => s + i.quantity * i.unitCost, 0)
+  const addOrderItem = () => { setOrderItems((prev) => [...prev, { productUuid: '', name: '', quantity: 1, unitCost: 0 }]) }
+  const updateOrderItem = (index: number, field: string, value: string | number) => { setOrderItems((prev) => prev.map((item, i) => { if (i !== index) return item; if (field === 'productUuid') { const p = products.find((pr) => pr.uuid === value); return { ...item, productUuid: String(value), name: p?.name || '', unitCost: p?.cost || item.unitCost } } return { ...item, [field]: value } })) }
+  const removeOrderItem = (index: number) => { setOrderItems((prev) => prev.filter((_, i) => i !== index)) }
+  const submitOrder = async () => {
+    if (!selectedSupplier) return setNotice('Selecione um fornecedor.')
+    if (!orderItems.length) return setNotice('Adicione pelo menos um item.')
+    const supplier = suppliers.find((s) => s.uuid === selectedSupplier)
+    if (!supplier) return setNotice('Fornecedor invalido.')
+    try {
+      const order = await createPurchaseOrder({ supplierUuid: selectedSupplier, supplierName: supplier.name, items: orderItems, expectedDelivery: expectedDelivery || undefined, notes: orderNotes || undefined })
+      reloadOrders(); setSelected(order); setShowNewOrder(false); setOrderItems([]); setSelectedSupplier(''); setExpectedDelivery(''); setOrderNotes(''); setNotice(`Pedido #${String(order.number).padStart(4, '0')} criado.`)
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao criar pedido.') }
+  }
+  const receiveItem = async (orderUuid: string, productUuid: string, quantity: number) => {
+    try { await receivePurchaseOrderItem(orderUuid, productUuid, quantity); reloadOrders(); setNotice('Item recebido.') } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao receber item.') }
+  }
+  const changeOrderStatus = async (orderUuid: string, status: PurchaseOrderStatus) => {
+    try { await updatePurchaseOrderStatus(orderUuid, status); reloadOrders(); setNotice('Status atualizado.') } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao atualizar status.') }
+  }
   const submitSupplier = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const data = new FormData(event.currentTarget); const name = String(data.get('name') ?? '').trim()
     if (!name) return
@@ -559,9 +592,17 @@ function PurchasesPage() {
       reloadSup(); event.currentTarget.reset(); setNotice('Fornecedor cadastrado.')
     } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao cadastrar fornecedor.') }
   }
+  const statusLabel = (s: PurchaseOrderStatus) => ({ draft: 'Rascunho', ordered: 'Enviado', partial: 'Parcial', received: 'Recebido', cancelled: 'Cancelado' }[s] || s)
+  const statusColor = (s: PurchaseOrderStatus) => ({ draft: '#6b7a8d', ordered: '#1768ac', partial: '#e6a817', received: '#44b27a', cancelled: '#dd5054' }[s] || '#6b7a8d')
   return (
     <>
-      <div className="section-header"><div className="section-header-content"><div><span className="eyebrow">COMPRAS</span><h2>Pedidos de compra</h2></div></div></div>
+      <div className="section-header"><div className="section-header-content"><div><span className="eyebrow">COMPRAS</span><h2>Gestao de pedidos de compra</h2></div>
+        <div className="financial-summary">
+          <div className="summary-pill receivable"><Truck size={14} /><span>Pendente</span><strong>{currency(totalPending)}</strong></div>
+          <div className="summary-pill payable"><CheckCircle size={14} /><span>Recebido</span><strong>{currency(totalReceived)}</strong></div>
+          <div className="summary-pill"><Box size={14} /><span>Total</span><strong>{currency(totalAll)}</strong></div>
+        </div>
+      </div></div>
       <div className="split-page">
         <article className="panel form-panel">
           <div className="panel-header"><div><span className="eyebrow">FORNECEDORES</span><h2>Novo fornecedor</h2></div></div>
@@ -571,34 +612,93 @@ function PurchasesPage() {
             <label>E-mail<input type="email" name="email" /></label>
             <button className="primary-button" type="submit"><Plus size={16} />Cadastrar</button>
           </form>
+          {suppliers.length > 0 && <div style={{ marginTop: 16 }}><div className="panel-header"><div><span className="eyebrow">CADASTRADOS</span><h2>{suppliers.length} fornecedores</h2></div></div><div className="data-list">{suppliers.map((s) => (<div className="data-row" key={s.uuid}><span className="avatar">{s.name.slice(0, 1)}</span><div><strong>{s.name}</strong><small>{s.document || 'Sem doc.'} · {s.phone || 'Sem tel.'}</small></div><button className="delete-product" onClick={async () => { if (window.confirm(`Excluir "${s.name}"?`)) { try { await deleteSupplier(s.uuid); reloadSup(); setNotice('Removido.') } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao excluir.') } } }}><Trash2 size={16} /></button></div>))}</div></div>}
         </article>
         <article className="panel list-panel">
-          <div className="panel-header"><div><span className="eyebrow">FORNECEDORES</span><h2>{suppliers.length} fornecedores</h2></div></div>
-          <div className="data-list">
-            {suppliers.map((s) => (
-              <div className="data-row" key={s.uuid}><span className="avatar">{s.name.slice(0, 1)}</span><div><strong>{s.name}</strong><small>{s.document || 'Sem doc.'}</small></div>
-                <button className="delete-product" onClick={async () => { if (window.confirm(`Excluir "${s.name}"?`)) { try { await deleteSupplier(s.uuid); reloadSup(); setNotice('Removido.') } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao excluir.') } } }}><Trash2 size={16} /></button>
-              </div>
-            ))}
-            {!suppliers.length && <Empty title="Nenhum fornecedor" text="Cadastre o primeiro." />}
+          <div className="panel-header"><div><span className="eyebrow">PEDIDOS</span><h2>{filtered.length} pedido{filtered.length === 1 ? '' : 's'}</h2></div>
+            <div className="filter-tabs">
+              <button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Todos</button>
+              <button className={filter === 'draft' ? 'active' : ''} onClick={() => setFilter('draft')}>Rascunho</button>
+              <button className={filter === 'ordered' ? 'active' : ''} onClick={() => setFilter('ordered')}>Enviado</button>
+              <button className={filter === 'partial' ? 'active' : ''} onClick={() => setFilter('partial')}>Parcial</button>
+              <button className={filter === 'received' ? 'active' : ''} onClick={() => setFilter('received')}>Recebido</button>
+            </div>
           </div>
+          <div className="data-list">
+            {filtered.slice().reverse().map((o) => (
+              <button className={`order-row ${selected?.uuid === o.uuid ? 'selected' : ''}`} key={o.uuid} onClick={() => { setSelected(o); setShowNewOrder(false) }}>
+                <span className="document-mark">#{String(o.number).padStart(4, '0')}</span>
+                <span className="grow"><b>{o.supplierName}</b><small>{o.items.length} itens · {o.expectedDelivery ? `Prev: ${o.expectedDelivery.split('-').reverse().join('/')}` : 'Sem previsão'}</small></span>
+                <span style={{ color: statusColor(o.status), fontSize: 11, fontWeight: 700 }}>{statusLabel(o.status)}</span>
+                <b>{currency(o.total)}</b>
+              </button>
+            ))}
+            {!filtered.length && <Empty title="Nenhum pedido" text="Crie um pedido de compra." />}
+          </div>
+          <button className="secondary-button" style={{ margin: 12 }} onClick={() => { setShowNewOrder(true); setSelected(undefined) }}><Plus size={15} />Novo pedido</button>
         </article>
       </div>
-      <div className="panel" style={{ marginTop: 16 }}>
-        <div className="panel-header"><div><span className="eyebrow">PEDIDOS</span><h2>{filtered.length} pedido{filtered.length === 1 ? '' : 's'}</h2></div>
-          <div className="filter-tabs"><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Todos</button><button className={filter === 'draft' ? 'active' : ''} onClick={() => setFilter('draft')}>Rascunho</button><button className={filter === 'received' ? 'active' : ''} onClick={() => setFilter('received')}>Recebido</button></div>
+      {showNewOrder && (
+        <div className="panel" style={{ marginTop: 16 }}>
+          <div className="panel-header"><div><span className="eyebrow">NOVO PEDIDO</span><h2>Criar pedido de compra</h2></div><button className="icon-button" onClick={() => setShowNewOrder(false)}><X size={17} /></button></div>
+          <div style={{ padding: 18 }}>
+            <label>Fornecedor<select value={selectedSupplier} onChange={(e) => setSelectedSupplier(e.target.value)} required><option value="">Selecione</option>{suppliers.map((s) => <option key={s.uuid} value={s.uuid}>{s.name}</option>)}</select></label>
+            <div className="form-row"><label>Previsao de entrega<input type="date" value={expectedDelivery} onChange={(e) => setExpectedDelivery(e.target.value)} /></label><label>Notas<input placeholder="Observacoes" value={orderNotes} onChange={(e) => setOrderNotes(e.target.value)} /></label></div>
+            <div className="panel-header" style={{ marginTop: 12 }}><div><span className="eyebrow">ITENS DO PEDIDO</span></div><button className="secondary-button" onClick={addOrderItem}><Plus size={14} />Adicionar item</button></div>
+            {orderItems.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 40px', gap: 8, fontSize: 10, fontWeight: 700, color: '#7a91a7', padding: '0 4px' }}><span>PRODUTO</span><span>QTD</span><span>CUSTO UNIT.</span><span>SUBTOTAL</span><span></span></div>
+                {orderItems.map((item, i) => (
+                  <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 40px', gap: 8, alignItems: 'center', padding: '6px 4px', borderTop: '1px solid #eef2f6' }}>
+                    <select value={item.productUuid} onChange={(e) => updateOrderItem(i, 'productUuid', e.target.value)} style={{ padding: '6px 8px', border: '1px solid #d4e7f7', borderRadius: 5, fontSize: 12 }}><option value="">Selecione</option>{products.map((p) => <option key={p.uuid} value={p.uuid}>{p.name} (Est: {p.stockQty})</option>)}</select>
+                    <input type="number" min="1" value={item.quantity} onChange={(e) => updateOrderItem(i, 'quantity', Math.max(1, Number(e.target.value) || 1))} style={{ padding: '6px 8px', border: '1px solid #d4e7f7', borderRadius: 5, fontSize: 12 }} />
+                    <input type="number" min="0" step="0.01" value={item.unitCost} onChange={(e) => updateOrderItem(i, 'unitCost', Math.max(0, Number(e.target.value) || 0))} style={{ padding: '6px 8px', border: '1px solid #d4e7f7', borderRadius: 5, fontSize: 12 }} />
+                    <b style={{ fontSize: 12 }}>{currency(item.quantity * item.unitCost)}</b>
+                    <button className="delete-product" onClick={() => removeOrderItem(i)} style={{ width: 26, height: 26 }}><Trash2 size={13} /></button>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '12px 4px', borderTop: '2px solid #d4e7f7', marginTop: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>Total: {currency(orderItemTotal)}</span>
+                </div>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button className="primary-button" onClick={submitOrder} disabled={!selectedSupplier || !orderItems.length}><Plus size={16} />Criar pedido</button>
+              <button className="secondary-button" onClick={() => setShowNewOrder(false)}>Cancelar</button>
+            </div>
+          </div>
         </div>
-        <div className="data-list">
-          {filtered.map((o) => (
-            <button className={`order-row ${selected?.uuid === o.uuid ? 'selected' : ''}`} key={o.uuid} onClick={() => setSelected(o)}>
-              <span className="document-mark">#{String(o.number).padStart(4, '0')}</span>
-              <span className="grow"><b>{o.supplierName}</b><small>{o.items.length} itens · {currency(o.total)}</small></span>
-              <span className="order-status">{o.status}</span>
-            </button>
-          ))}
-          {!filtered.length && <Empty title="Nenhum pedido" text="Crie um pedido de compra." />}
+      )}
+      {selected && !showNewOrder && (
+        <div className="panel" style={{ marginTop: 16 }}>
+          <div className="panel-header"><div><span className="eyebrow">PEDIDO #{String(selected.number).padStart(4, '0')}</span><h2>{selected.supplierName} · {currency(selected.total)}</h2></div><button className="icon-button" onClick={() => setSelected(undefined)}><X size={17} /></button></div>
+          <div style={{ padding: 18 }}>
+            <div style={{ display: 'flex', gap: 16, marginBottom: 12, fontSize: 12, color: '#5a7a94' }}>
+              <span>Status: <b style={{ color: statusColor(selected.status) }}>{statusLabel(selected.status)}</b></span>
+              {selected.expectedDelivery && <span>Previsao: <b>{selected.expectedDelivery.split('-').reverse().join('/')}</b></span>}
+              {selected.notes && <span>Notas: <b>{selected.notes}</b></span>}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: 8, fontSize: 10, fontWeight: 700, color: '#7a91a7', padding: '0 4px' }}><span>PRODUTO</span><span>PEDIDO</span><span>RECEBIDO</span><span>CUSTO UNIT.</span><span>ACAO</span></div>
+            {selected.items.map((item, i) => (
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: 8, alignItems: 'center', padding: '8px 4px', borderTop: '1px solid #eef2f6' }}>
+                <span style={{ fontSize: 12 }}><strong>{item.name}</strong></span>
+                <span style={{ fontSize: 12 }}>{item.quantity}</span>
+                <span style={{ fontSize: 12, color: item.receivedQty >= item.quantity ? '#44b27a' : '#e6a817' }}>{item.receivedQty}/{item.quantity}</span>
+                <span style={{ fontSize: 12 }}>{currency(item.unitCost)}</span>
+                <span>{item.receivedQty < item.quantity && selected.status !== 'received' && selected.status !== 'cancelled' && (
+                  <button className="secondary-button" style={{ padding: '4px 8px', fontSize: 10 }} onClick={() => receiveItem(selected.uuid, item.productUuid, item.quantity - item.receivedQty)}>Receber</button>
+                )}</span>
+              </div>
+            ))}
+            <div style={{ display: 'flex', gap: 8, marginTop: 16, borderTop: '2px solid #d4e7f7', paddingTop: 12 }}>
+              {selected.status === 'draft' && <button className="secondary-button" onClick={() => changeOrderStatus(selected.uuid, 'ordered')}>Marcar como Enviado</button>}
+              {selected.status === 'ordered' && <button className="secondary-button" onClick={() => changeOrderStatus(selected.uuid, 'partial')}>Marcar como Parcial</button>}
+              {(selected.status === 'ordered' || selected.status === 'partial') && <button className="primary-button" onClick={() => changeOrderStatus(selected.uuid, 'received')}>Marcar como Recebido</button>}
+              {selected.status !== 'received' && selected.status !== 'cancelled' && <button className="delete-product" style={{ marginLeft: 'auto' }} onClick={() => changeOrderStatus(selected.uuid, 'cancelled')}>Cancelar pedido</button>}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
       {notice && <Notice text={notice} onDismiss={() => setNotice('')} />}
     </>
   )
