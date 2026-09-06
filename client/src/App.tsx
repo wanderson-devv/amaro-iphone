@@ -147,7 +147,7 @@ function Dashboard({ onNavigate }: { onNavigate: (page: Page) => void }) {
               <span className="document-mark">#{String(sale.number).padStart(4, '0')}</span>
               <div><strong>Venda concluida</strong><small>{formatDate(sale.createdAt)} · {sale.paymentMethod}</small></div>
               <b>{currency(sale.total)}</b>
-              <button className="delete-product" title="Cancelar venda" onClick={async () => { if (window.confirm(`Cancelar venda #${String(sale.number).padStart(4, '0')}? O estoque sera devolvido.`)) { await api.sales.cancel(sale.uuid); reload() } }}><X size={15} /></button>
+              <button className="delete-product" title="Cancelar venda" onClick={async () => { if (window.confirm(`Cancelar venda #${String(sale.number).padStart(4, '0')}? O estoque sera devolvido.`)) { try { await api.sales.cancel(sale.uuid); reload() } catch (error) { alert(error instanceof Error ? error.message : 'Falha ao cancelar.') } } }}><X size={15} /></button>
             </div>
           ))}
           {salesForDay.length === 0 && <Empty title="Nenhuma venda neste periodo" text="Escolha as datas ou conclua uma venda no PDV." />}
@@ -209,10 +209,11 @@ function PointOfSale() {
           <div className="product-results">
             {filtered.map((p) => <button key={p.uuid} className="product-result" onClick={() => addProduct(p)}><span><b>{p.name}</b><small>{p.code} · {p.stockQty} {p.unit}</small></span><strong>{currency(p.salePrice)}</strong><Plus size={17} /></button>)}
             {products.length === 0 && <Empty title="Cadastre produtos" text="Use o modulo Produtos." />}
+            {products.length > 0 && filtered.length === 0 && <Empty title="Nenhum resultado" text="Tente outro termo de busca." />}
           </div>
         </article>
         <article className="panel cart-panel">
-          <div className="panel-header"><div><span className="eyebrow">CARRINHO</span><h2>{cart.length} item{cart.length === 1 ? '' : 'ns'}</h2></div><button className="text-button" onClick={() => setCart([])}>Limpar</button></div>
+          <div className="panel-header"><div><span className="eyebrow">CARRINHO</span><h2>{cart.length} item{cart.length === 1 ? '' : 'ens'}</h2></div><button className="text-button" onClick={() => setCart([])}>Limpar</button></div>
           <div className="cart-lines">
             {cart.map((line) => (
               <div className="cart-line" key={line.product.uuid}>
@@ -231,8 +232,8 @@ function PointOfSale() {
           {cart.length > 0 && (
             <div className="checkout">
               <div className="checkout-adjustments">
-                <label>Desconto R$<input type="number" min="0" step="0.01" value={discount} onChange={(e) => setDiscount(Number(e.target.value))} /></label>
-                <label>Taxa R$<input type="number" min="0" step="0.01" value={surcharge} onChange={(e) => setSurcharge(Number(e.target.value))} /></label>
+                <label>Desconto R$<input type="number" min="0" step="0.01" value={discount} onChange={(e) => setDiscount(Math.max(0, Number(e.target.value) || 0))} /></label>
+                <label>Taxa R$<input type="number" min="0" step="0.01" value={surcharge} onChange={(e) => setSurcharge(Math.max(0, Number(e.target.value) || 0))} /></label>
                 <label>Pagamento<select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}>{(['Dinheiro', 'PIX', 'Debito', 'Credito', 'Crediario', 'Transferencia'] as PaymentMethod[]).map((m) => <option key={m}>{m}</option>)}</select></label>
               </div>
               <div className="total-line"><span>Total</span><strong>{currency(total)}</strong></div>
@@ -253,8 +254,10 @@ function CustomersPage() {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const data = new FormData(event.currentTarget); const name = String(data.get('name') ?? '').trim()
     if (!name) return
-    await createCustomer({ name, document: String(data.get('document') ?? ''), phone: String(data.get('phone') ?? ''), email: String(data.get('email') ?? '') })
-    reload(); event.currentTarget.reset(); setNotice('Cliente cadastrado.')
+    try {
+      await createCustomer({ name, document: String(data.get('document') ?? ''), phone: String(data.get('phone') ?? ''), email: String(data.get('email') ?? '') })
+      reload(); event.currentTarget.reset(); setNotice('Cliente cadastrado.')
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao cadastrar cliente.') }
   }
   const visible = customers.filter((c) => [c.name, c.document, c.phone].some((v) => v?.toLowerCase().includes(query.toLowerCase())))
   return (
@@ -291,10 +294,12 @@ function ProductsPage() {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const data = new FormData(event.currentTarget); const name = String(data.get('name') ?? '').trim()
     if (!name) return
-    await createProduct({ code: String(data.get('code') ?? '').trim() || `PRD-${Date.now()}`, sku: String(data.get('sku') ?? ''), barcode: String(data.get('barcode') ?? ''), name, category: String(data.get('category') ?? ''), cost: Number(data.get('cost') ?? 0), salePrice: Number(data.get('price') ?? 0), minStock: Number(data.get('minimum') ?? 0), unit: String(data.get('unit') ?? 'UN') })
-    const initialStock = Number(data.get('stock') ?? 0)
-    if (initialStock > 0) { const products = await api.products.list(); const last = products[products.length - 1]; if (last) await adjustStock(last.uuid, initialStock, 'Estoque inicial') }
-    reload(); event.currentTarget.reset(); setNotice('Produto criado.')
+    try {
+      const created = await createProduct({ code: String(data.get('code') ?? '').trim() || `PRD-${Date.now()}`, sku: String(data.get('sku') ?? ''), barcode: String(data.get('barcode') ?? ''), name, category: String(data.get('category') ?? ''), cost: Number(data.get('cost') ?? 0), salePrice: Number(data.get('price') ?? 0), minStock: Number(data.get('minimum') ?? 0), unit: String(data.get('unit') ?? 'UN') })
+      const initialStock = Number(data.get('stock') ?? 0)
+      if (initialStock > 0 && created?.uuid) await adjustStock(created.uuid, initialStock, 'Estoque inicial')
+      reload(); event.currentTarget.reset(); setNotice('Produto criado.')
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao cadastrar produto.') }
   }
   return (
     <>
@@ -366,10 +371,12 @@ function ServiceOrdersPage() {
     event.preventDefault(); const data = new FormData(event.currentTarget)
     const name = String(data.get('clientName') ?? '').trim()
     if (!name) return setNotice('Informe o nome do cliente.')
-    const customer = await createCustomer({ name, document: String(data.get('clientDocument') ?? '') || undefined, phone: String(data.get('clientPhone') ?? '') || undefined, email: String(data.get('clientEmail') ?? '') || undefined, notes: undefined })
-    reloadCustomers()
-    const order = await createServiceOrder({ customerUuid: customer.uuid, equipment: String(data.get('equipment') ?? ''), brand: String(data.get('brand') ?? ''), model: String(data.get('model') ?? ''), reportedIssue: String(data.get('issue') ?? ''), expectedDelivery: String(data.get('expectedDelivery') ?? '') || undefined, technician: String(data.get('technician') ?? '') })
-    reload(); event.currentTarget.reset(); setSelected(order); setNotice(`OS #${String(order.number).padStart(4, '0')} aberta.`)
+    try {
+      const customer = await createCustomer({ name, document: String(data.get('clientDocument') ?? '') || undefined, phone: String(data.get('clientPhone') ?? '') || undefined, email: String(data.get('clientEmail') ?? '') || undefined, notes: undefined })
+      reloadCustomers()
+      const order = await createServiceOrder({ customerUuid: customer.uuid, equipment: String(data.get('equipment') ?? ''), brand: String(data.get('brand') ?? ''), model: String(data.get('model') ?? ''), reportedIssue: String(data.get('issue') ?? ''), expectedDelivery: String(data.get('expectedDelivery') ?? '') || undefined, technician: String(data.get('technician') ?? '') })
+      reload(); event.currentTarget.reset(); setSelected(order); setNotice(`OS #${String(order.number).padStart(4, '0')} aberta.`)
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao abrir OS.') }
   }
   return (
     <>
@@ -412,7 +419,7 @@ function ServiceOrdersPage() {
 function OrderDetail({ order, products, onMessage, onReload }: { order: ServiceOrder; products: Product[]; onMessage: (msg: string) => void; onReload: () => void }) {
   const [productUuid, setProductUuid] = useState('')
   const [quantity, setQuantity] = useState(1)
-  const changeStatus = async (status: ServiceOrderStatus) => { await updateServiceOrderStatus(order.uuid, status); onReload(); onMessage('Status atualizado.') }
+  const changeStatus = async (status: ServiceOrderStatus) => { try { await updateServiceOrderStatus(order.uuid, status); onReload(); onMessage('Status atualizado.') } catch (error) { onMessage(error instanceof Error ? error.message : 'Falha ao atualizar status.') } }
   const consume = async () => { if (!productUuid) return; try { await consumePartInServiceOrder(order.uuid, productUuid, quantity); setProductUuid(''); setQuantity(1); onReload(); onMessage('Peca consumida.') } catch (error) { onMessage(error instanceof Error ? error.message : 'Falha.') } }
   return (
     <div className="detail-content">
@@ -474,8 +481,10 @@ function FinancialPage() {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const data = new FormData(event.currentTarget); const description = String(data.get('description') ?? '').trim()
     if (!description) return
-    await createFinancialEntry({ type: String(data.get('type')) as FinancialEntryType, description, amount: Number(data.get('amount') ?? 0), dueDate: String(data.get('dueDate')), supplierName: String(data.get('supplierName') ?? '') || undefined })
-    reload(); event.currentTarget.reset(); setNotice('Conta registrada.')
+    try {
+      await createFinancialEntry({ type: String(data.get('type')) as FinancialEntryType, description, amount: Number(data.get('amount') ?? 0), dueDate: String(data.get('dueDate')), supplierName: String(data.get('supplierName') ?? '') || undefined })
+      reload(); event.currentTarget.reset(); setNotice('Conta registrada.')
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao registrar conta.') }
   }
   const handlePay = async () => { if (!payingEntry || !Number(payAmount)) return; try { await payFinancialEntry(payingEntry.uuid, Number(payAmount), 'Dinheiro'); setPayingEntry(undefined); setPayAmount(''); reload(); setNotice('Pagamento registrado.') } catch (error) { setNotice(error instanceof Error ? error.message : 'Falha.') } }
   const handleCancel = async (entry: FinancialEntry) => { if (!window.confirm(`Cancelar "${entry.description}"?`)) return; try { await cancelFinancialEntry(entry.uuid); reload(); setNotice('Cancelada.') } catch (error) { setNotice(error instanceof Error ? error.message : 'Falha.') } }
@@ -545,8 +554,10 @@ function PurchasesPage() {
   const submitSupplier = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const data = new FormData(event.currentTarget); const name = String(data.get('name') ?? '').trim()
     if (!name) return
-    await createSupplier({ name, document: String(data.get('document') ?? ''), phone: String(data.get('phone') ?? ''), email: String(data.get('email') ?? ''), address: String(data.get('address') ?? '') })
-    reloadSup(); event.currentTarget.reset(); setNotice('Fornecedor cadastrado.')
+    try {
+      await createSupplier({ name, document: String(data.get('document') ?? ''), phone: String(data.get('phone') ?? ''), email: String(data.get('email') ?? ''), address: String(data.get('address') ?? '') })
+      reloadSup(); event.currentTarget.reset(); setNotice('Fornecedor cadastrado.')
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao cadastrar fornecedor.') }
   }
   return (
     <>
@@ -562,11 +573,11 @@ function PurchasesPage() {
           </form>
         </article>
         <article className="panel list-panel">
-          <div className="panel-header"><div><span className="eyebrow">FORNECEDORES</span><h2>{suppliers.length}</h2></div></div>
+          <div className="panel-header"><div><span className="eyebrow">FORNECEDORES</span><h2>{suppliers.length} fornecedores</h2></div></div>
           <div className="data-list">
             {suppliers.map((s) => (
               <div className="data-row" key={s.uuid}><span className="avatar">{s.name.slice(0, 1)}</span><div><strong>{s.name}</strong><small>{s.document || 'Sem doc.'}</small></div>
-                <button className="delete-product" onClick={async () => { if (window.confirm(`Excluir "${s.name}"?`)) { await deleteSupplier(s.uuid); reloadSup(); setNotice('Removido.') } }}><Trash2 size={16} /></button>
+                <button className="delete-product" onClick={async () => { if (window.confirm(`Excluir "${s.name}"?`)) { try { await deleteSupplier(s.uuid); reloadSup(); setNotice('Removido.') } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao excluir.') } } }}><Trash2 size={16} /></button>
               </div>
             ))}
             {!suppliers.length && <Empty title="Nenhum fornecedor" text="Cadastre o primeiro." />}
