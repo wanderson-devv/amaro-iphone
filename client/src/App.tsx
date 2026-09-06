@@ -551,7 +551,6 @@ function PurchasesPage() {
   const [selected, setSelected] = useState<PurchaseOrder | undefined>()
   const [notice, setNotice] = useState('')
   const [filter, setFilter] = useState<'all' | PurchaseOrderStatus>('all')
-  const [showNewOrder, setShowNewOrder] = useState(false)
   const [orderItems, setOrderItems] = useState<Array<{ productUuid: string; name: string; quantity: number; unitCost: number }>>([])
   const [selectedSupplier, setSelectedSupplier] = useState('')
   const [expectedDelivery, setExpectedDelivery] = useState('')
@@ -579,7 +578,7 @@ function PurchasesPage() {
     setOrderBusy(true)
     try {
       const order = await createPurchaseOrder({ supplierUuid: selectedSupplier, supplierName: supplier.name, items: orderItems, expectedDelivery: expectedDelivery || undefined, notes: orderNotes || undefined })
-      reloadOrders(); setSelected(order); setShowNewOrder(false); setOrderItems([]); setSelectedSupplier(''); setExpectedDelivery(''); setOrderNotes(''); setNotice(`Pedido #${String(order.number).padStart(4, '0')} criado.`)
+      reloadOrders(); setSelected(order); setOrderItems([]); setSelectedSupplier(''); setExpectedDelivery(''); setOrderNotes(''); setNotice(`Pedido #${String(order.number).padStart(4, '0')} criado.`)
     } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao criar pedido.') } finally { setOrderBusy(false) }
   }
   const receiveItem = async (orderUuid: string, productUuid: string, quantity: number) => {
@@ -630,7 +629,7 @@ function PurchasesPage() {
           </div>
           <div className="data-list">
             {filtered.slice().reverse().map((o) => (
-              <button className={`order-row ${selected?.uuid === o.uuid ? 'selected' : ''}`} key={o.uuid} onClick={() => { setSelected(o); setShowNewOrder(false) }}>
+              <button className={`order-row ${selected?.uuid === o.uuid ? 'selected' : ''}`} key={o.uuid} onClick={() => setSelected(o)}>
                 <span className="document-mark">#{String(o.number).padStart(4, '0')}</span>
                 <span className="grow"><b>{o.supplierName}</b><small>{o.items.length} itens · {o.expectedDelivery ? `Prev: ${o.expectedDelivery.split('-').reverse().join('/')}` : 'Sem previsão'}</small></span>
                 <span style={{ color: statusColor(o.status), fontSize: 11, fontWeight: 700 }}>{statusLabel(o.status)}</span>
@@ -639,12 +638,10 @@ function PurchasesPage() {
             ))}
             {!filtered.length && <Empty title="Nenhum pedido" text="Crie um pedido de compra." />}
           </div>
-          <button className="secondary-button" style={{ margin: 12 }} onClick={() => { setShowNewOrder(true); setSelected(undefined) }}><Plus size={15} />Novo pedido</button>
         </article>
       </div>
-      {showNewOrder && (
-        <div className="panel" style={{ marginTop: 16 }}>
-          <div className="panel-header"><div><span className="eyebrow">NOVO PEDIDO</span><h2>Criar pedido de compra</h2></div><button className="icon-button" onClick={() => setShowNewOrder(false)}><X size={17} /></button></div>
+      <div className="panel" style={{ marginTop: 16 }}>
+          <div className="panel-header"><div><span className="eyebrow">NOVO PEDIDO</span><h2>Criar pedido de compra</h2></div></div>
           <div style={{ padding: 18 }}>
             <label>Fornecedor<select value={selectedSupplier} onChange={(e) => setSelectedSupplier(e.target.value)} required><option value="">Selecione</option>{suppliers.map((s) => <option key={s.uuid} value={s.uuid}>{s.name}</option>)}</select></label>
             <div className="form-row"><label>Previsao de entrega<input type="date" value={expectedDelivery} onChange={(e) => setExpectedDelivery(e.target.value)} /></label><label>Notas<input placeholder="Observacoes" value={orderNotes} onChange={(e) => setOrderNotes(e.target.value)} /></label></div>
@@ -668,12 +665,10 @@ function PurchasesPage() {
             )}
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
               <button className="primary-button" onClick={submitOrder} disabled={orderBusy || !selectedSupplier || !orderItems.length}>{orderBusy ? 'Criando...' : 'Criar pedido'}</button>
-              <button className="secondary-button" onClick={() => setShowNewOrder(false)}>Cancelar</button>
             </div>
           </div>
         </div>
-      )}
-      {selected && !showNewOrder && (
+      {selected && (
         <div className="panel" style={{ marginTop: 16 }}>
           <div className="panel-header"><div><span className="eyebrow">PEDIDO #{String(selected.number).padStart(4, '0')}</span><h2>{selected.supplierName} · {currency(selected.total)}</h2></div><button className="icon-button" onClick={() => setSelected(undefined)}><X size={17} /></button></div>
           <div style={{ padding: 18 }}>
