@@ -357,7 +357,7 @@ function EditProductModal({ product, onClose, onMessage, onReload }: { product: 
 }
 
 function ServiceOrdersPage() {
-  const { data: customers, reload: reloadCustomers } = useApiData(() => api.customers.list(), [])
+  const { reload: reloadCustomers } = useApiData(() => api.customers.list(), [])
   const { data: orders, reload } = useApiData(() => api.serviceOrders.list(), [])
   const { data: products } = useApiData(() => api.products.list(), [])
   const [selected, setSelected] = useState<ServiceOrder | undefined>()
