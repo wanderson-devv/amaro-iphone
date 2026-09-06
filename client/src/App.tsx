@@ -568,21 +568,25 @@ function PurchasesPage() {
   const addOrderItem = () => { setOrderItems((prev) => [...prev, { productUuid: '', name: '', quantity: 1, unitCost: 0 }]) }
   const updateOrderItem = (index: number, field: string, value: string | number) => { setOrderItems((prev) => prev.map((item, i) => { if (i !== index) return item; if (field === 'productUuid') { const p = products.find((pr) => pr.uuid === value); return { ...item, productUuid: String(value), name: p?.name || '', unitCost: p?.cost || item.unitCost } } return { ...item, [field]: value } })) }
   const removeOrderItem = (index: number) => { setOrderItems((prev) => prev.filter((_, i) => i !== index)) }
+  const [orderBusy, setOrderBusy] = useState(false)
   const submitOrder = async () => {
     if (!selectedSupplier) return setNotice('Selecione um fornecedor.')
     if (!orderItems.length) return setNotice('Adicione pelo menos um item.')
+    const invalidItem = orderItems.find((i) => !i.productUuid)
+    if (invalidItem) return setNotice('Selecione um produto para todos os itens.')
     const supplier = suppliers.find((s) => s.uuid === selectedSupplier)
     if (!supplier) return setNotice('Fornecedor invalido.')
+    setOrderBusy(true)
     try {
       const order = await createPurchaseOrder({ supplierUuid: selectedSupplier, supplierName: supplier.name, items: orderItems, expectedDelivery: expectedDelivery || undefined, notes: orderNotes || undefined })
       reloadOrders(); setSelected(order); setShowNewOrder(false); setOrderItems([]); setSelectedSupplier(''); setExpectedDelivery(''); setOrderNotes(''); setNotice(`Pedido #${String(order.number).padStart(4, '0')} criado.`)
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao criar pedido.') }
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao criar pedido.') } finally { setOrderBusy(false) }
   }
   const receiveItem = async (orderUuid: string, productUuid: string, quantity: number) => {
-    try { await receivePurchaseOrderItem(orderUuid, productUuid, quantity); reloadOrders(); setNotice('Item recebido.') } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao receber item.') }
+    try { await receivePurchaseOrderItem(orderUuid, productUuid, quantity); const fresh = await api.purchaseOrders.list(); reloadOrders(); const updated = fresh.find((o) => o.uuid === orderUuid); if (updated) setSelected(updated); setNotice('Item recebido.') } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao receber item.') }
   }
   const changeOrderStatus = async (orderUuid: string, status: PurchaseOrderStatus) => {
-    try { await updatePurchaseOrderStatus(orderUuid, status); reloadOrders(); setNotice('Status atualizado.') } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao atualizar status.') }
+    try { await updatePurchaseOrderStatus(orderUuid, status); const fresh = await api.purchaseOrders.list(); reloadOrders(); const updated = fresh.find((o) => o.uuid === orderUuid); if (updated) setSelected(updated); setNotice('Status atualizado.') } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao atualizar status.') }
   }
   const submitSupplier = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const data = new FormData(event.currentTarget); const name = String(data.get('name') ?? '').trim()
@@ -663,7 +667,7 @@ function PurchasesPage() {
               </div>
             )}
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button className="primary-button" onClick={submitOrder} disabled={!selectedSupplier || !orderItems.length}><Plus size={16} />Criar pedido</button>
+              <button className="primary-button" onClick={submitOrder} disabled={orderBusy || !selectedSupplier || !orderItems.length}>{orderBusy ? 'Criando...' : 'Criar pedido'}</button>
               <button className="secondary-button" onClick={() => setShowNewOrder(false)}>Cancelar</button>
             </div>
           </div>
