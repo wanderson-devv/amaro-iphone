@@ -645,15 +645,19 @@ function PurchasesPage() {
           <div style={{ padding: 18 }}>
             <label>Fornecedor<select value={selectedSupplier} onChange={(e) => setSelectedSupplier(e.target.value)} required><option value="">Selecione</option>{suppliers.map((s) => <option key={s.uuid} value={s.uuid}>{s.name}</option>)}</select></label>
             <div className="form-row"><label>Previsao de entrega<input type="date" value={expectedDelivery} onChange={(e) => setExpectedDelivery(e.target.value)} /></label><label>Notas<input placeholder="Observacoes" value={orderNotes} onChange={(e) => setOrderNotes(e.target.value)} /></label></div>
-            <div className="panel-header" style={{ marginTop: 12 }}><div><span className="eyebrow">ITENS DO PEDIDO</span></div><button className="secondary-button" onClick={addOrderItem}><Plus size={14} />Adicionar item</button></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 100px auto', gap: 8, alignItems: 'end', marginTop: 12 }}>
+              <label style={{ margin: 0 }}>Produto<select id="orderProductSelect" value="" onChange={(e) => { const p = products.find((pr) => pr.uuid === e.target.value); if (p) { setOrderItems((prev) => [...prev, { productUuid: p.uuid, name: p.name, quantity: 1, unitCost: p.cost }]); e.target.value = '' } }} style={{ width: '100%' }}><option value="">Selecione um produto</option>{products.filter((p) => p.stockQty > 0).map((p) => <option key={p.uuid} value={p.uuid}>{p.name} (Est: {p.stockQty})</option>)}</select></label>
+              <label style={{ margin: 0 }}>QTD<input type="number" min="1" defaultValue="1" id="orderQtyInput" style={{ width: '100%' }} /></label>
+              <label style={{ margin: 0 }}>Custo Unit.<input type="number" min="0" step="0.01" defaultValue="0" id="orderCostInput" style={{ width: '100%' }} /></label>
+              <button className="primary-button" onClick={() => { const sel = document.getElementById('orderProductSelect') as HTMLSelectElement; const qty = document.getElementById('orderQtyInput') as HTMLInputElement; const cost = document.getElementById('orderCostInput') as HTMLInputElement; const p = products.find((pr) => pr.uuid === sel.value); if (!p) return setNotice('Selecione um produto.'); const q = Math.max(1, Number(qty.value) || 1); const c = Math.max(0, Number(cost.value) || 0); setOrderItems((prev) => [...prev, { productUuid: p.uuid, name: p.name, quantity: q, unitCost: c }]); sel.value = ''; qty.value = '1'; cost.value = '0' }}><Plus size={16} /></button>
+            </div>
             {orderItems.length > 0 && (
-              <div style={{ marginTop: 8 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 40px', gap: 8, fontSize: 10, fontWeight: 700, color: '#7a91a7', padding: '0 4px' }}><span>PRODUTO</span><span>QTD</span><span>CUSTO UNIT.</span><span>SUBTOTAL</span><span></span></div>
+              <div style={{ marginTop: 12 }}>
                 {orderItems.map((item, i) => (
-                  <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 40px', gap: 8, alignItems: 'center', padding: '6px 4px', borderTop: '1px solid #eef2f6' }}>
-                    <select value={item.productUuid} onChange={(e) => updateOrderItem(i, 'productUuid', e.target.value)} style={{ padding: '6px 8px', border: '1px solid #d4e7f7', borderRadius: 5, fontSize: 12 }}><option value="">Selecione</option>{products.map((p) => <option key={p.uuid} value={p.uuid}>{p.name} (Est: {p.stockQty})</option>)}</select>
-                    <input type="number" min="1" value={item.quantity} onChange={(e) => updateOrderItem(i, 'quantity', Math.max(1, Number(e.target.value) || 1))} style={{ padding: '6px 8px', border: '1px solid #d4e7f7', borderRadius: 5, fontSize: 12 }} />
-                    <input type="number" min="0" step="0.01" value={item.unitCost} onChange={(e) => updateOrderItem(i, 'unitCost', Math.max(0, Number(e.target.value) || 0))} style={{ padding: '6px 8px', border: '1px solid #d4e7f7', borderRadius: 5, fontSize: 12 }} />
+                  <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 80px 100px 100px 40px', gap: 8, alignItems: 'center', padding: '6px 4px', borderTop: '1px solid #eef2f6' }}>
+                    <span style={{ fontSize: 12 }}><strong>{item.name}</strong></span>
+                    <span style={{ fontSize: 12 }}>{item.quantity}</span>
+                    <span style={{ fontSize: 12 }}>{currency(item.unitCost)}</span>
                     <b style={{ fontSize: 12 }}>{currency(item.quantity * item.unitCost)}</b>
                     <button className="delete-product" onClick={() => removeOrderItem(i)} style={{ width: 26, height: 26 }}><Trash2 size={13} /></button>
                   </div>
