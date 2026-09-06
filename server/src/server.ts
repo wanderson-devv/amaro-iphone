@@ -52,8 +52,8 @@ app.get('/v1/auth/me', { preHandler: requireAuth }, async (request) => {
 })
 
 // Customers
-app.get('/v1/customers', { preHandler: requireAuth }, async () => {
-  const result = await pool.query('SELECT * FROM customers WHERE deleted_at IS NULL ORDER BY created_at DESC')
+app.get('/v1/customers', { preHandler: requireAuth }, async (request) => {
+  const result = await pool.query('SELECT * FROM customers WHERE deleted_at IS NULL AND created_by = $1 ORDER BY created_at DESC', [request.user.sub])
   return result.rows.map(mapCustomer)
 })
 
@@ -71,13 +71,13 @@ app.put<{ Params: { uuid: string }; Body: { name?: string; document?: string; ph
 })
 
 app.delete<{ Params: { uuid: string } }>('/v1/customers/:uuid', { preHandler: requireAuth }, async (request) => {
-  await pool.query("UPDATE customers SET deleted_at=NOW() WHERE uuid=$1", [request.params.uuid])
+  await pool.query("UPDATE customers SET deleted_at=NOW() WHERE uuid=$1 AND created_by=$2", [request.params.uuid, request.user.sub])
   return { ok: true }
 })
 
 // Products
-app.get('/v1/products', { preHandler: requireAuth }, async () => {
-  const result = await pool.query('SELECT * FROM products WHERE deleted_at IS NULL ORDER BY created_at DESC')
+app.get('/v1/products', { preHandler: requireAuth }, async (request) => {
+  const result = await pool.query('SELECT * FROM products WHERE deleted_at IS NULL AND created_by = $1 ORDER BY created_at DESC', [request.user.sub])
   return result.rows.map(mapProduct)
 })
 
@@ -95,7 +95,7 @@ app.put<{ Params: { uuid: string }; Body: any }>('/v1/products/:uuid', { preHand
 })
 
 app.delete<{ Params: { uuid: string } }>('/v1/products/:uuid', { preHandler: requireAuth }, async (request) => {
-  await pool.query("UPDATE products SET deleted_at=NOW() WHERE uuid=$1", [request.params.uuid])
+  await pool.query("UPDATE products SET deleted_at=NOW() WHERE uuid=$1 AND created_by=$2", [request.params.uuid, request.user.sub])
   return { ok: true }
 })
 
@@ -108,8 +108,8 @@ app.post<{ Params: { uuid: string }; Body: { quantity: number; reason: string } 
 })
 
 // Sales
-app.get('/v1/sales', { preHandler: requireAuth }, async () => {
-  const result = await pool.query('SELECT * FROM sales WHERE deleted_at IS NULL ORDER BY created_at DESC')
+app.get('/v1/sales', { preHandler: requireAuth }, async (request) => {
+  const result = await pool.query('SELECT * FROM sales WHERE deleted_at IS NULL AND created_by = $1 ORDER BY created_at DESC', [request.user.sub])
   return result.rows.map(mapSale)
 })
 
@@ -170,8 +170,8 @@ app.post<{ Params: { uuid: string } }>('/v1/sales/:uuid/cancel', { preHandler: r
 })
 
 // Service Orders
-app.get('/v1/service-orders', { preHandler: requireAuth }, async () => {
-  const result = await pool.query('SELECT * FROM service_orders WHERE deleted_at IS NULL ORDER BY created_at DESC')
+app.get('/v1/service-orders', { preHandler: requireAuth }, async (request) => {
+  const result = await pool.query('SELECT * FROM service_orders WHERE deleted_at IS NULL AND created_by = $1 ORDER BY created_at DESC', [request.user.sub])
   return result.rows.map(mapServiceOrder)
 })
 
@@ -217,8 +217,8 @@ app.post<{ Params: { uuid: string }; Body: { productUuid: string; quantity: numb
 })
 
 // Financial
-app.get('/v1/financial', { preHandler: requireAuth }, async () => {
-  const result = await pool.query('SELECT * FROM financial_entries WHERE deleted_at IS NULL ORDER BY due_date ASC')
+app.get('/v1/financial', { preHandler: requireAuth }, async (request) => {
+  const result = await pool.query('SELECT * FROM financial_entries WHERE deleted_at IS NULL AND created_by = $1 ORDER BY due_date ASC', [request.user.sub])
   return result.rows.map(mapFinancial)
 })
 
@@ -236,13 +236,13 @@ app.post<{ Params: { uuid: string }; Body: { amount: number; paymentMethod: stri
 })
 
 app.delete<{ Params: { uuid: string } }>('/v1/financial/:uuid', { preHandler: requireAuth }, async (request) => {
-  await pool.query("UPDATE financial_entries SET deleted_at=NOW() WHERE uuid=$1", [request.params.uuid])
+  await pool.query("UPDATE financial_entries SET deleted_at=NOW() WHERE uuid=$1 AND created_by=$2", [request.params.uuid, request.user.sub])
   return { ok: true }
 })
 
 // Suppliers
-app.get('/v1/suppliers', { preHandler: requireAuth }, async () => {
-  const result = await pool.query('SELECT * FROM suppliers WHERE deleted_at IS NULL ORDER BY created_at DESC')
+app.get('/v1/suppliers', { preHandler: requireAuth }, async (request) => {
+  const result = await pool.query('SELECT * FROM suppliers WHERE deleted_at IS NULL AND created_by = $1 ORDER BY created_at DESC', [request.user.sub])
   return result.rows.map(mapSupplier)
 })
 
@@ -253,13 +253,13 @@ app.post<{ Body: { name: string; document?: string; phone?: string; email?: stri
 })
 
 app.delete<{ Params: { uuid: string } }>('/v1/suppliers/:uuid', { preHandler: requireAuth }, async (request) => {
-  await pool.query("UPDATE suppliers SET deleted_at=NOW() WHERE uuid=$1", [request.params.uuid])
+  await pool.query("UPDATE suppliers SET deleted_at=NOW() WHERE uuid=$1 AND created_by=$2", [request.params.uuid, request.user.sub])
   return { ok: true }
 })
 
 // Purchase Orders
-app.get('/v1/purchase-orders', { preHandler: requireAuth }, async () => {
-  const result = await pool.query('SELECT * FROM purchase_orders WHERE deleted_at IS NULL ORDER BY created_at DESC')
+app.get('/v1/purchase-orders', { preHandler: requireAuth }, async (request) => {
+  const result = await pool.query('SELECT * FROM purchase_orders WHERE deleted_at IS NULL AND created_by = $1 ORDER BY created_at DESC', [request.user.sub])
   return result.rows.map(mapPurchaseOrder)
 })
 
@@ -310,8 +310,8 @@ app.post<{ Params: { uuid: string }; Body: { productUuid: string; quantity: numb
 })
 
 // Audit
-app.get('/v1/audit', { preHandler: requireAuth }, async () => {
-  const result = await pool.query('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 200')
+app.get('/v1/audit', { preHandler: requireAuth }, async (request) => {
+  const result = await pool.query('SELECT * FROM audit_logs WHERE created_by = $1 ORDER BY created_at DESC LIMIT 200', [request.user.sub])
   return result.rows.map((r) => ({ uuid: r.uuid, entityType: r.entity_type, entityUuid: r.entity_uuid, action: r.action, previousValue: r.previous_value, newValue: r.new_value, createdAt: r.created_at }))
 })
 
