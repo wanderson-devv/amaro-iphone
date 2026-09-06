@@ -4,7 +4,7 @@ import { api } from './services/api'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { Login } from './pages/Login'
 import type { FinancialEntry, FinancialEntryType, PaymentMethod, Product, PurchaseOrder, PurchaseOrderStatus, ServiceOrder, ServiceOrderStatus } from './lib/types'
-import { completeSale, consumePartInServiceOrder, createCustomer, createFinancialEntry, createProduct, createServiceOrder, createSupplier, cancelFinancialEntry, deleteProduct, deleteSupplier, payFinancialEntry, adjustStock, updateProduct, updateServiceOrderStatus } from './services/operations'
+import { completeSale, consumePartInServiceOrder, createCustomer, createFinancialEntry, createProduct, createServiceOrder, createSupplier, createPurchaseOrder, cancelFinancialEntry, deleteProduct, deleteSupplier, payFinancialEntry, adjustStock, updateProduct, updateServiceOrderStatus, updatePurchaseOrderStatus, receivePurchaseOrderItem } from './services/operations'
 
 type Page = 'dashboard' | 'pdv' | 'orders' | 'customers' | 'products' | 'stock' | 'financial' | 'purchases' | 'guarantees' | 'reports' | 'settings'
 type CartLine = { product: Product; quantity: number }
