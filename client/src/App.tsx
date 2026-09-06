@@ -564,8 +564,6 @@ function PurchasesPage() {
   const totalReceived = receivedOrders.reduce((s, o) => s + o.total, 0)
   const totalAll = orders.reduce((s, o) => s + o.total, 0)
   const orderItemTotal = orderItems.reduce((s, i) => s + i.quantity * i.unitCost, 0)
-  const addOrderItem = () => { setOrderItems((prev) => [...prev, { productUuid: '', name: '', quantity: 1, unitCost: 0 }]) }
-  const updateOrderItem = (index: number, field: string, value: string | number) => { setOrderItems((prev) => prev.map((item, i) => { if (i !== index) return item; if (field === 'productUuid') { const p = products.find((pr) => pr.uuid === value); return { ...item, productUuid: String(value), name: p?.name || '', unitCost: p?.cost || item.unitCost } } return { ...item, [field]: value } })) }
   const removeOrderItem = (index: number) => { setOrderItems((prev) => prev.filter((_, i) => i !== index)) }
   const [orderBusy, setOrderBusy] = useState(false)
   const submitOrder = async () => {
@@ -646,7 +644,7 @@ function PurchasesPage() {
             <label>Fornecedor<select value={selectedSupplier} onChange={(e) => setSelectedSupplier(e.target.value)} required><option value="">Selecione</option>{suppliers.map((s) => <option key={s.uuid} value={s.uuid}>{s.name}</option>)}</select></label>
             <div className="form-row"><label>Previsao de entrega<input type="date" value={expectedDelivery} onChange={(e) => setExpectedDelivery(e.target.value)} /></label><label>Notas<input placeholder="Observacoes" value={orderNotes} onChange={(e) => setOrderNotes(e.target.value)} /></label></div>
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 100px auto', gap: 8, alignItems: 'end', marginTop: 12 }}>
-              <label style={{ margin: 0 }}>Produto<select id="orderProductSelect" value="" onChange={(e) => { const p = products.find((pr) => pr.uuid === e.target.value); if (p) { setOrderItems((prev) => [...prev, { productUuid: p.uuid, name: p.name, quantity: 1, unitCost: p.cost }]); e.target.value = '' } }} style={{ width: '100%' }}><option value="">Selecione um produto</option>{products.filter((p) => p.stockQty > 0).map((p) => <option key={p.uuid} value={p.uuid}>{p.name} (Est: {p.stockQty})</option>)}</select></label>
+              <label style={{ margin: 0 }}>Produto<select id="orderProductSelect" style={{ width: '100%' }}><option value="">Selecione um produto</option>{products.filter((p) => p.stockQty > 0).map((p) => <option key={p.uuid} value={p.uuid}>{p.name} (Est: {p.stockQty})</option>)}</select></label>
               <label style={{ margin: 0 }}>QTD<input type="number" min="1" defaultValue="1" id="orderQtyInput" style={{ width: '100%' }} /></label>
               <label style={{ margin: 0 }}>Custo Unit.<input type="number" min="0" step="0.01" defaultValue="0" id="orderCostInput" style={{ width: '100%' }} /></label>
               <button className="primary-button" onClick={() => { const sel = document.getElementById('orderProductSelect') as HTMLSelectElement; const qty = document.getElementById('orderQtyInput') as HTMLInputElement; const cost = document.getElementById('orderCostInput') as HTMLInputElement; const p = products.find((pr) => pr.uuid === sel.value); if (!p) return setNotice('Selecione um produto.'); const q = Math.max(1, Number(qty.value) || 1); const c = Math.max(0, Number(cost.value) || 0); setOrderItems((prev) => [...prev, { productUuid: p.uuid, name: p.name, quantity: q, unitCost: c }]); sel.value = ''; qty.value = '1'; cost.value = '0' }}><Plus size={16} /></button>
