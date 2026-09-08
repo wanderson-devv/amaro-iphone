@@ -204,9 +204,9 @@ app.post<{ Params: { uuid: string }; Body: { productUuid: string; quantity: numb
     const pRes = await client.query('SELECT * FROM products WHERE uuid=$1 AND deleted_at IS NULL FOR UPDATE', [productUuid])
     const product = pRes.rows[0]; if (!product) throw new Error('Produto nao encontrado.')
     if (product.stock_qty < quantity) throw new Error('Estoque insuficiente.')
-    const item = { productUuid, name: product.name, quantity, unitPrice: product.sale_price, total: product.sale_price * quantity }
-    const currentItems = order.items || []
-    const newTotal = currentItems.reduce((s: number, i: any) => s + i.total, 0) + item.total + (order.labor || 0) - (order.discount || 0)
+    const item = { productUuid, name: product.name, quantity, unitPrice: Number(product.sale_price), total: Number(product.sale_price) * quantity }
+    const currentItems = (order.items || []) as any[]
+    const newTotal = currentItems.reduce((s: number, i: any) => s + Number(i.total), 0) + item.total + Number(order.labor || 0) - Number(order.discount || 0)
     await client.query('UPDATE service_orders SET items = items || $1::jsonb, total=$2, updated_at=NOW() WHERE uuid=$3', [JSON.stringify([item]), newTotal, uuid])
     await client.query('UPDATE products SET stock_qty = stock_qty - $1, updated_at=NOW() WHERE uuid=$2', [quantity, productUuid])
     await client.query('INSERT INTO stock_movements(product_uuid, type, quantity, previous_qty, resulting_qty, reference_type, reference_uuid, created_by) VALUES($1,\'service_order\',$2,$3,$4,\'service_order\',$5,$6)', [productUuid, -quantity, product.stock_qty, product.stock_qty - quantity, uuid, request.user.sub])
