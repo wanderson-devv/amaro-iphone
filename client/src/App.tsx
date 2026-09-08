@@ -830,10 +830,10 @@ function PurchasesPage() {
           <div style={{ padding: 18 }}>
             {!editing ? (
               <>
-                <div style={{ display: 'flex', gap: 16, marginBottom: 12, fontSize: 12, color: '#5a7a94' }}>
-                  <span>Status: <b style={{ color: statusColor(selected.status) }}>{statusLabel(selected.status)}</b></span>
-                  {selected.expectedDelivery && <span>Previsao: <b>{selected.expectedDelivery.split('-').reverse().join('/')}</b></span>}
-                  {selected.notes && <span>Notas: <b>{selected.notes}</b></span>}
+                <div style={{ display: 'flex', gap: 16, marginBottom: 12, fontSize: 11, color: '#8fa3b5' }}>
+                  <span>Status: <b style={{ color: statusColor(selected.status), fontWeight: 600 }}>{statusLabel(selected.status)}</b></span>
+                  {selected.expectedDelivery && <span>Previsao: <b style={{ fontWeight: 500 }}>{selected.expectedDelivery.split('-').reverse().join('/')}</b></span>}
+                  {selected.notes && <span>Notas: <b style={{ fontWeight: 500 }}>{selected.notes}</b></span>}
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: 8, fontSize: 10, fontWeight: 700, color: '#7a91a7', padding: '0 4px' }}><span>PRODUTO</span><span>PEDIDO</span><span>RECEBIDO</span><span>CUSTO UNIT.</span><span>ACAO</span></div>
                 {selected.items.map((item, i) => (
