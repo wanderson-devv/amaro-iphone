@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, type FormEvent } from 'react'
-import { Activity, AlertTriangle, BadgeDollarSign, Banknote, Box, Boxes, CalendarDays, CheckCircle, CreditCard, FileText, Gauge, LayoutDashboard, Menu, Pencil, Plus, Search, Settings, ShoppingCart, Sparkles, Trash2, Truck, Users, Wrench, X, Download } from 'lucide-react'
+import { Activity, AlertTriangle, BadgeDollarSign, Banknote, Box, Boxes, CalendarDays, CheckCircle, CreditCard, FileText, Gauge, LayoutDashboard, Menu, Pencil, Plus, ScanBarcode, Search, Settings, ShoppingCart, Sparkles, Trash2, Truck, Users, Wrench, X, Download } from 'lucide-react'
 import { api } from './services/api'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { Login } from './pages/Login'
@@ -414,6 +414,28 @@ function ProductsPage() {
   const { data: products, reload } = useApiData(() => api.products.list(), [])
   const [notice, setNotice] = useState('')
   const [editingProduct, setEditingProduct] = useState<Product | undefined>()
+  const [barcodeValue, setBarcodeValue] = useState('')
+  const [barcodeStatus, setBarcodeStatus] = useState<'idle' | 'searching' | 'found' | 'not-found'>('idle')
+  const [foundProduct, setFoundProduct] = useState<Product | undefined>()
+  const formRef = useState<HTMLFormElement | null>(null)[0]
+  const handleBarcodeScan = async (value: string) => {
+    if (!value.trim()) { setBarcodeStatus('idle'); setFoundProduct(undefined); return }
+    setBarcodeStatus('searching')
+    try {
+      const all = await api.products.list()
+      const found = all.find((p) => p.barcode === value.trim())
+      if (found) {
+        setFoundProduct(found)
+        setBarcodeStatus('found')
+        setNotice(`Produto encontrado: ${found.name}`)
+      } else {
+        setFoundProduct(undefined)
+        setBarcodeStatus('not-found')
+        const barcodeInput = document.querySelector('input[name="barcode"]') as HTMLInputElement
+        if (barcodeInput) barcodeInput.value = value
+      }
+    } catch { setBarcodeStatus('not-found') }
+  }
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const data = new FormData(event.currentTarget); const name = String(data.get('name') ?? '').trim()
     if (!name) return
@@ -421,7 +443,7 @@ function ProductsPage() {
       const created = await createProduct({ code: String(data.get('code') ?? '').trim() || `PRD-${Date.now()}`, sku: String(data.get('sku') ?? ''), barcode: String(data.get('barcode') ?? ''), name, category: String(data.get('category') ?? ''), cost: Number(data.get('cost') ?? 0), salePrice: Number(data.get('price') ?? 0), minStock: Number(data.get('minimum') ?? 0), unit: String(data.get('unit') ?? 'UN') })
       const initialStock = Number(data.get('stock') ?? 0)
       if (initialStock > 0 && created?.uuid) await adjustStock(created.uuid, initialStock, 'Estoque inicial')
-      reload(); event.currentTarget.reset(); setNotice('Produto criado.')
+      reload(); event.currentTarget.reset(); setBarcodeValue(''); setBarcodeStatus('idle'); setFoundProduct(undefined); setNotice('Produto criado.')
     } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao cadastrar produto.') }
   }
   return (
@@ -429,13 +451,20 @@ function ProductsPage() {
       <div className="split-page product-page">
         <article className="panel form-panel">
           <div className="panel-header"><div><span className="eyebrow">CATALOGO</span><h2>Novo produto</h2></div></div>
+          <div className="barcode-scanner-box">
+            <div className="barcode-scanner-label"><ScanBarcode size={16} /><span>Leitor de codigo de barras</span></div>
+            <input className="barcode-scanner-input" type="text" placeholder="Escaneie ou digite o codigo de barras..." value={barcodeValue} onChange={(e) => { setBarcodeValue(e.target.value); if (barcodeStatus !== 'idle') { setBarcodeStatus('idle'); setFoundProduct(undefined) } }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleBarcodeScan(barcodeValue) } }} autoFocus />
+            {barcodeStatus === 'searching' && <small className="barcode-status searching">Buscando...</small>}
+            {barcodeStatus === 'found' && foundProduct && <small className="barcode-status found">Encontrado: <b>{foundProduct.name}</b> — {currency(foundProduct.salePrice)}</small>}
+            {barcodeStatus === 'not-found' && <small className="barcode-status not-found">Codigo nao encontrado. Preencha os dados para cadastrar.</small>}
+          </div>
           <form onSubmit={submit}>
-            <label>Nome<input name="name" required placeholder="Ex.: Tela iPhone 13" /></label>
-            <div className="form-row"><label>Codigo interno<input name="code" placeholder="Gerado se vazio" /></label><label>SKU<input name="sku" /></label></div>
-            <div className="form-row"><label>Custo<input name="cost" type="number" min="0" step="0.01" defaultValue="0" /></label><label>Preco de venda<input name="price" type="number" min="0" step="0.01" defaultValue="0" /></label></div>
-            <div className="form-row"><label>Estoque minimo<input name="minimum" type="number" min="0" step="1" defaultValue="0" /></label><label>Estoque inicial<input name="stock" type="number" min="0" step="1" defaultValue="0" /></label></div>
-            <div className="form-row"><label>Unidade<select name="unit"><option>UN</option><option>PC</option><option>MT</option></select></label><label>Codigo de barras<input name="barcode" /></label></div>
-            <button className="primary-button" type="submit"><Plus size={16} />Cadastrar produto</button>
+            <label>Nome<input name="name" required placeholder="Ex.: Tela iPhone 13" defaultValue={foundProduct?.name ?? ''} /></label>
+            <div className="form-row"><label>Codigo interno<input name="code" placeholder="Gerado se vazio" defaultValue={foundProduct?.code ?? ''} /></label><label>SKU<input name="sku" defaultValue={foundProduct?.sku ?? ''} /></label></div>
+            <div className="form-row"><label>Custo<input name="cost" type="number" min="0" step="0.01" defaultValue={foundProduct?.cost ?? 0} /></label><label>Preco de venda<input name="price" type="number" min="0" step="0.01" defaultValue={foundProduct?.salePrice ?? 0} /></label></div>
+            <div className="form-row"><label>Estoque minimo<input name="minimum" type="number" min="0" step="1" defaultValue={foundProduct?.minStock ?? 0} /></label><label>Estoque inicial<input name="stock" type="number" min="0" step="1" defaultValue="0" /></label></div>
+            <div className="form-row"><label>Unidade<select name="unit" defaultValue={foundProduct?.unit ?? 'UN'}><option>UN</option><option>PC</option><option>MT</option></select></label><label>Codigo de barras<input name="barcode" defaultValue={foundProduct?.barcode ?? barcodeValue} /></label></div>
+            <button className="primary-button" type="submit"><Plus size={16} />{foundProduct ? 'Atualizar cadastro' : 'Cadastrar produto'}</button>
           </form>
         </article>
         <article className="panel list-panel">
