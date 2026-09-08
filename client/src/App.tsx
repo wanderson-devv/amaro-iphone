@@ -466,18 +466,17 @@ function ProductsPage() {
       }
 
       if (!online?.name) {
-        logs.push('Buscando no EAN-Search...')
+        logs.push('Buscando em Open Products Facts...')
         setSearchLog([...logs])
         try {
-          const eanRes = await fetch(`https://api.ean-search.org/api/v1?barcode=${code}&format=json`)
-          if (eanRes.ok) {
-            const eanData = await eanRes.json()
-            if (eanData.product) {
-              online = { name: eanData.product.name || undefined, category: eanData.product.category || undefined, brand: eanData.product.brand || undefined }
-              logs.push(`EAN-Search: ${eanData.product.name}`)
-            } else { logs.push('EAN-Search: nao encontrado') }
-          } else { logs.push(`EAN-Search: HTTP ${eanRes.status}`) }
-        } catch (e) { logs.push('EAN-Search: erro de conexao') }
+          const opfRes = await fetch(`https://world.openproductsfacts.org/api/v2/product/${code}.json`)
+          const opfData = await opfRes.json()
+          if (opfData.status === 1 && opfData.product?.product_name) {
+            const p = opfData.product
+            online = { name: p.product_name || undefined, category: p.categories || undefined, brand: p.brands || undefined }
+            logs.push(`Open Products Facts: ${p.product_name}`)
+          } else { logs.push('Open Products Facts: nao encontrado') }
+        } catch (e) { logs.push('Open Products Facts: erro de conexao') }
       }
 
       setSearchLog([...logs])
