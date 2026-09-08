@@ -419,11 +419,12 @@ function ProductsPage() {
   const [foundProduct, setFoundProduct] = useState<Product | undefined>()
   const [onlineData, setOnlineData] = useState<{ name?: string; category?: string; brand?: string; image?: string } | undefined>()
   const handleBarcodeScan = async (value: string) => {
-    if (!value.trim()) { setBarcodeStatus('idle'); setFoundProduct(undefined); setOnlineData(undefined); return }
+    const code = value.trim()
+    if (!code) { setBarcodeStatus('idle'); setFoundProduct(undefined); setOnlineData(undefined); return }
     setBarcodeStatus('searching')
     try {
       const all = await api.products.list()
-      const found = all.find((p) => p.barcode === value.trim())
+      const found = all.find((p) => p.barcode === code)
       if (found) {
         setFoundProduct(found)
         setOnlineData(undefined)
@@ -433,7 +434,7 @@ function ProductsPage() {
       setFoundProduct(undefined)
       let online: { name?: string; category?: string; brand?: string } | undefined
       try {
-        const offRes = await fetch(`https://world.openfoodfacts.org/api/v2/product/${value.trim()}.json`)
+        const offRes = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json`)
         const offData = await offRes.json()
         if (offData.status === 1 && offData.product) {
           const p = offData.product
@@ -442,7 +443,7 @@ function ProductsPage() {
       } catch {}
       if (!online?.name) {
         try {
-          const upcRes = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${value.trim()}`)
+          const upcRes = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${code}`)
           const upcData = await upcRes.json()
           if (upcData.items?.length) {
             const item = upcData.items[0]
@@ -476,7 +477,7 @@ function ProductsPage() {
           <div className="panel-header"><div><span className="eyebrow">CATALOGO</span><h2>Novo produto</h2></div></div>
           <div className="barcode-scanner-box">
             <div className="barcode-scanner-label"><ScanBarcode size={16} /><span>Leitor de codigo de barras</span></div>
-            <input className="barcode-scanner-input" type="text" placeholder="Escaneie ou digite o codigo de barras..." value={barcodeValue} onChange={(e) => { setBarcodeValue(e.target.value); if (barcodeStatus !== 'idle') { setBarcodeStatus('idle'); setFoundProduct(undefined); setOnlineData(undefined) } }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleBarcodeScan(barcodeValue) } }} autoFocus />
+            <input className="barcode-scanner-input" type="text" placeholder="Escaneie ou digite o codigo de barras..." value={barcodeValue} onChange={(e) => { setBarcodeValue(e.target.value); if (barcodeStatus !== 'idle') { setBarcodeStatus('idle'); setFoundProduct(undefined); setOnlineData(undefined) } }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const val = (e.target as HTMLInputElement).value; handleBarcodeScan(val) } }} autoFocus />
             {barcodeStatus === 'searching' && <small className="barcode-status searching">Buscando...</small>}
             {barcodeStatus === 'found' && foundProduct && <small className="barcode-status found">Encontrado no catalogo: <b>{foundProduct.name}</b> — {currency(foundProduct.salePrice)}</small>}
             {barcodeStatus === 'found' && onlineData && <small className="barcode-status found">Encontrado online: <b>{onlineData.name}</b>{onlineData.brand ? ` — ${onlineData.brand}` : ''}{onlineData.category ? ` · ${onlineData.category}` : ''}</small>}
