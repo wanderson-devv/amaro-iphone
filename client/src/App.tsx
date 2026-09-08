@@ -4,7 +4,7 @@ import { api } from './services/api'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { Login } from './pages/Login'
 import type { FinancialEntry, FinancialEntryType, PaymentMethod, Product, PurchaseOrder, PurchaseOrderStatus, ServiceOrder, ServiceOrderStatus } from './lib/types'
-import { completeSale, consumePartInServiceOrder, createCustomer, createFinancialEntry, createProduct, createServiceOrder, createSupplier, createPurchaseOrder, cancelFinancialEntry, deleteProduct, deleteSupplier, payFinancialEntry, adjustStock, updateProduct, updateServiceOrderStatus, updatePurchaseOrderStatus, receivePurchaseOrderItem } from './services/operations'
+import { completeSale, consumePartInServiceOrder, createCustomer, createFinancialEntry, createProduct, createServiceOrder, createSupplier, createPurchaseOrder, cancelFinancialEntry, deleteProduct, deleteSupplier, payFinancialEntry, adjustStock, updateProduct, updateServiceOrderStatus, updatePurchaseOrderStatus, updatePurchaseOrder, receivePurchaseOrderItem } from './services/operations'
 
 type Page = 'dashboard' | 'pdv' | 'orders' | 'customers' | 'products' | 'stock' | 'financial' | 'purchases' | 'guarantees' | 'reports' | 'settings'
 type CartLine = { product: Product; quantity: number }
@@ -679,6 +679,11 @@ function PurchasesPage() {
   const [selectedSupplier, setSelectedSupplier] = useState('')
   const [expectedDelivery, setExpectedDelivery] = useState('')
   const [orderNotes, setOrderNotes] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [editItems, setEditItems] = useState<Array<{ productUuid: string; name: string; quantity: number; unitCost: number }>>([])
+  const [editSupplier, setEditSupplier] = useState('')
+  const [editDelivery, setEditDelivery] = useState('')
+  const [editNotes, setEditNotes] = useState('')
   const filtered = filter === 'all' ? orders : orders.filter((o) => o.status === filter)
   const draftOrders = orders.filter((o) => o.status === 'draft')
   const orderedOrders = orders.filter((o) => o.status === 'ordered')
@@ -719,6 +724,31 @@ function PurchasesPage() {
   }
   const statusLabel = (s: PurchaseOrderStatus) => ({ draft: 'Rascunho', ordered: 'Enviado', partial: 'Parcial', received: 'Recebido', cancelled: 'Cancelado' }[s] || s)
   const statusColor = (s: PurchaseOrderStatus) => ({ draft: '#6b7a8d', ordered: '#1768ac', partial: '#e6a817', received: '#44b27a', cancelled: '#dd5054' }[s] || '#6b7a8d')
+  const startEdit = () => {
+    if (!selected) return
+    setEditSupplier(selected.supplierUuid)
+    setEditItems(selected.items.map((i) => ({ productUuid: i.productUuid, name: i.name, quantity: i.quantity, unitCost: i.unitCost })))
+    setEditDelivery(selected.expectedDelivery || '')
+    setEditNotes(selected.notes || '')
+    setEditing(true)
+  }
+  const removeEditItem = (index: number) => { setEditItems((prev) => prev.filter((_, i) => i !== index)) }
+  const saveEdit = async () => {
+    if (!selected) return
+    if (!editSupplier) return setNotice('Selecione um fornecedor.')
+    if (!editItems.length) return setNotice('Adicione pelo menos um item.')
+    const supplier = suppliers.find((s) => s.uuid === editSupplier)
+    if (!supplier) return setNotice('Fornecedor invalido.')
+    try {
+      await updatePurchaseOrder(selected.uuid, { supplierUuid: editSupplier, supplierName: supplier.name, items: editItems, expectedDelivery: editDelivery || undefined, notes: editNotes || undefined })
+      const fresh = await api.purchaseOrders.list()
+      reloadOrders()
+      const updated = fresh.find((o) => o.uuid === selected.uuid)
+      if (updated) setSelected(updated)
+      setEditing(false)
+      setNotice('Pedido atualizado.')
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao atualizar pedido.') }
+  }
   return (
     <>
       <div className="section-header"><div className="section-header-content"><div><span className="eyebrow">COMPRAS</span><h2>Gestao de pedidos de compra</h2></div>
@@ -796,31 +826,70 @@ function PurchasesPage() {
         </div>
       {selected && (
         <div className="panel" style={{ marginTop: 16 }}>
-          <div className="panel-header"><div><span className="eyebrow">PEDIDO #{String(selected.number).padStart(4, '0')}</span><h2>{selected.supplierName} · {currency(selected.total)}</h2></div><button className="icon-button" onClick={() => setSelected(undefined)}><X size={17} /></button></div>
+          <div className="panel-header"><div><span className="eyebrow">PEDIDO #{String(selected.number).padStart(4, '0')}</span><h2>{selected.supplierName} · {currency(selected.total)}</h2></div><button className="icon-button" onClick={() => { setSelected(undefined); setEditing(false) }}><X size={17} /></button></div>
           <div style={{ padding: 18 }}>
-            <div style={{ display: 'flex', gap: 16, marginBottom: 12, fontSize: 12, color: '#5a7a94' }}>
-              <span>Status: <b style={{ color: statusColor(selected.status) }}>{statusLabel(selected.status)}</b></span>
-              {selected.expectedDelivery && <span>Previsao: <b>{selected.expectedDelivery.split('-').reverse().join('/')}</b></span>}
-              {selected.notes && <span>Notas: <b>{selected.notes}</b></span>}
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: 8, fontSize: 10, fontWeight: 700, color: '#7a91a7', padding: '0 4px' }}><span>PRODUTO</span><span>PEDIDO</span><span>RECEBIDO</span><span>CUSTO UNIT.</span><span>ACAO</span></div>
-            {selected.items.map((item, i) => (
-              <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: 8, alignItems: 'center', padding: '8px 4px', borderTop: '1px solid #eef2f6' }}>
-                <span style={{ fontSize: 12 }}><strong>{item.name}</strong></span>
-                <span style={{ fontSize: 12 }}>{item.quantity}</span>
-                <span style={{ fontSize: 12, color: item.receivedQty >= item.quantity ? '#44b27a' : '#e6a817' }}>{item.receivedQty}/{item.quantity}</span>
-                <span style={{ fontSize: 12 }}>{currency(item.unitCost)}</span>
-                <span>{item.receivedQty < item.quantity && selected.status !== 'received' && selected.status !== 'cancelled' && (
-                  <button className="secondary-button" style={{ padding: '4px 8px', fontSize: 10 }} onClick={() => receiveItem(selected.uuid, item.productUuid, item.quantity - item.receivedQty)}>Receber</button>
-                )}</span>
-              </div>
-            ))}
-            <div style={{ display: 'flex', gap: 8, marginTop: 16, borderTop: '2px solid #d4e7f7', paddingTop: 12 }}>
-              {selected.status === 'draft' && <button className="secondary-button" onClick={() => changeOrderStatus(selected.uuid, 'ordered')}>Marcar como Enviado</button>}
-              {selected.status === 'ordered' && <button className="secondary-button" onClick={() => changeOrderStatus(selected.uuid, 'partial')}>Marcar como Parcial</button>}
-              {(selected.status === 'ordered' || selected.status === 'partial') && <button className="primary-button" onClick={() => changeOrderStatus(selected.uuid, 'received')}>Marcar como Recebido</button>}
-              {selected.status !== 'received' && selected.status !== 'cancelled' && <button className="delete-product" style={{ marginLeft: 'auto' }} onClick={() => changeOrderStatus(selected.uuid, 'cancelled')}>Cancelar pedido</button>}
-            </div>
+            {!editing ? (
+              <>
+                <div style={{ display: 'flex', gap: 16, marginBottom: 12, fontSize: 12, color: '#5a7a94' }}>
+                  <span>Status: <b style={{ color: statusColor(selected.status) }}>{statusLabel(selected.status)}</b></span>
+                  {selected.expectedDelivery && <span>Previsao: <b>{selected.expectedDelivery.split('-').reverse().join('/')}</b></span>}
+                  {selected.notes && <span>Notas: <b>{selected.notes}</b></span>}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: 8, fontSize: 10, fontWeight: 700, color: '#7a91a7', padding: '0 4px' }}><span>PRODUTO</span><span>PEDIDO</span><span>RECEBIDO</span><span>CUSTO UNIT.</span><span>ACAO</span></div>
+                {selected.items.map((item, i) => (
+                  <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: 8, alignItems: 'center', padding: '8px 4px', borderTop: '1px solid #eef2f6' }}>
+                    <span style={{ fontSize: 12 }}><strong>{item.name}</strong></span>
+                    <span style={{ fontSize: 12 }}>{item.quantity}</span>
+                    <span style={{ fontSize: 12, color: item.receivedQty >= item.quantity ? '#44b27a' : '#e6a817' }}>{item.receivedQty}/{item.quantity}</span>
+                    <span style={{ fontSize: 12 }}>{currency(item.unitCost)}</span>
+                    <span>{item.receivedQty < item.quantity && selected.status !== 'received' && selected.status !== 'cancelled' && (
+                      <button className="secondary-button" style={{ padding: '4px 8px', fontSize: 10 }} onClick={() => receiveItem(selected.uuid, item.productUuid, item.quantity - item.receivedQty)}>Receber</button>
+                    )}</span>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', gap: 8, marginTop: 16, borderTop: '2px solid #d4e7f7', paddingTop: 12 }}>
+                  {selected.status === 'draft' && <button className="secondary-button" onClick={startEdit}><Pencil size={14} />Editar</button>}
+                  {selected.status === 'draft' && <button className="secondary-button" onClick={() => changeOrderStatus(selected.uuid, 'ordered')}>Marcar como Enviado</button>}
+                  {selected.status === 'ordered' && <button className="secondary-button" onClick={() => changeOrderStatus(selected.uuid, 'partial')}>Marcar como Parcial</button>}
+                  {(selected.status === 'ordered' || selected.status === 'partial') && <button className="primary-button" onClick={() => changeOrderStatus(selected.uuid, 'received')}>Marcar como Recebido</button>}
+                  {selected.status !== 'received' && selected.status !== 'cancelled' && <button className="delete-product" style={{ marginLeft: 'auto' }} onClick={() => changeOrderStatus(selected.uuid, 'cancelled')}>Cancelar pedido</button>}
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', gap: 16, marginBottom: 12, fontSize: 12, color: '#5a7a94' }}>
+                  <span>Editando rascunho</span>
+                </div>
+                <label>Fornecedor<select value={editSupplier} onChange={(e) => setEditSupplier(e.target.value)} required><option value="">Selecione</option>{suppliers.map((s) => <option key={s.uuid} value={s.uuid}>{s.name}</option>)}</select></label>
+                <div className="form-row"><label>Previsao de entrega<input type="date" value={editDelivery} onChange={(e) => setEditDelivery(e.target.value)} /></label><label>Notas<input placeholder="Observacoes" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} /></label></div>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 100px auto', gap: 8, alignItems: 'end', marginTop: 12 }}>
+                  <label style={{ margin: 0 }}>Produto<select id="editProductSelect" style={{ width: '100%' }}><option value="">Selecione um produto</option>{products.filter((p) => p.stockQty > 0).map((p) => <option key={p.uuid} value={p.uuid}>{p.name} (Est: {p.stockQty})</option>)}</select></label>
+                  <label style={{ margin: 0 }}>QTD<input type="number" min="1" defaultValue="1" id="editQtyInput" style={{ width: '100%' }} /></label>
+                  <label style={{ margin: 0 }}>Custo Unit.<input type="number" min="0" step="0.01" defaultValue="0" id="editCostInput" style={{ width: '100%' }} /></label>
+                  <button className="primary-button" onClick={() => { const sel = document.getElementById('editProductSelect') as HTMLSelectElement; const qty = document.getElementById('editQtyInput') as HTMLInputElement; const cost = document.getElementById('editCostInput') as HTMLInputElement; const p = products.find((pr) => pr.uuid === sel.value); if (!p) return setNotice('Selecione um produto.'); const q = Math.max(1, Number(qty.value) || 1); const c = Math.max(0, Number(cost.value) || 0); setEditItems((prev) => [...prev, { productUuid: p.uuid, name: p.name, quantity: q, unitCost: c }]); sel.value = ''; qty.value = '1'; cost.value = '0' }}><Plus size={16} /></button>
+                </div>
+                {editItems.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    {editItems.map((item, i) => (
+                      <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 80px 100px 100px 40px', gap: 8, alignItems: 'center', padding: '6px 4px', borderTop: '1px solid #eef2f6' }}>
+                        <span style={{ fontSize: 12 }}><strong>{item.name}</strong></span>
+                        <span style={{ fontSize: 12 }}>{item.quantity}</span>
+                        <span style={{ fontSize: 12 }}>{currency(item.unitCost)}</span>
+                        <b style={{ fontSize: 12 }}>{currency(item.quantity * item.unitCost)}</b>
+                        <button className="delete-product" onClick={() => removeEditItem(i)} style={{ width: 26, height: 26 }}><Trash2 size={13} /></button>
+                      </div>
+                    ))}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '12px 4px', borderTop: '2px solid #d4e7f7', marginTop: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700 }}>Total: {currency(editItems.reduce((s, i) => s + i.quantity * i.unitCost, 0))}</span>
+                    </div>
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  <button className="primary-button" onClick={saveEdit}>Salvar alteracoes</button>
+                  <button className="secondary-button" onClick={() => setEditing(false)}>Cancelar</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

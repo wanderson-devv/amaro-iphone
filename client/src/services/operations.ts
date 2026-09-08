@@ -74,6 +74,10 @@ export async function updatePurchaseOrderStatus(orderUuid: string, status: Purch
   return api.purchaseOrders.updateStatus(orderUuid, status)
 }
 
+export async function updatePurchaseOrder(orderUuid: string, input: { supplierUuid?: string; supplierName?: string; items?: Array<{ productUuid: string; name: string; quantity: number; unitCost: number }>; expectedDelivery?: string; notes?: string }) {
+  return api.purchaseOrders.update(orderUuid, input)
+}
+
 export async function receivePurchaseOrderItem(orderUuid: string, productUuid: string, quantity: number) {
   return api.purchaseOrders.receiveItem(orderUuid, productUuid, quantity)
 }

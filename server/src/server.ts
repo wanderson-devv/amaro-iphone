@@ -278,6 +278,26 @@ app.post<{ Body: { supplierUuid: string; supplierName: string; items: Array<{ pr
   return mapPurchaseOrder(result.rows[0])
 })
 
+app.put<{ Params: { uuid: string }; Body: { supplierUuid?: string; supplierName?: string; items?: Array<{ productUuid: string; name: string; quantity: number; unitCost: number }>; expectedDelivery?: string; notes?: string } }>('/v1/purchase-orders/:uuid', { preHandler: requireAuth }, async (request) => {
+  const { uuid } = request.params; const b = request.body
+  const current = await pool.query('SELECT * FROM purchase_orders WHERE uuid=$1 AND deleted_at IS NULL', [uuid])
+  if (!current.rows.length) throw new Error('Pedido nao encontrado.')
+  const order = current.rows[0]
+  if (order.status !== 'draft') throw new Error('Apenas pedidos em rascunho podem ser editados.')
+  const supplierUuid = b.supplierUuid ?? order.supplier_uuid
+  const supplierName = b.supplierName ?? order.supplier_name
+  const expectedDelivery = b.expectedDelivery ?? order.expected_delivery
+  const notes = b.notes ?? order.notes
+  let items = order.items
+  let total = order.total
+  if (b.items) {
+    items = b.items.map((i) => ({ ...i, total: i.quantity * i.unitCost, receivedQty: 0 }))
+    total = items.reduce((s: number, i: any) => s + i.total, 0)
+  }
+  const result = await pool.query('UPDATE purchase_orders SET supplier_uuid=$1, supplier_name=$2, items=$3, total=$4, expected_delivery=$5, notes=$6, updated_at=NOW() WHERE uuid=$7 AND deleted_at IS NULL RETURNING *', [supplierUuid, supplierName, JSON.stringify(items), total, expectedDelivery, notes, uuid])
+  return mapPurchaseOrder(result.rows[0])
+})
+
 app.put<{ Params: { uuid: string }; Body: { status: string } }>('/v1/purchase-orders/:uuid/status', { preHandler: requireAuth }, async (request) => {
   const result = await pool.query('UPDATE purchase_orders SET status=$1, updated_at=NOW() WHERE uuid=$2 AND deleted_at IS NULL RETURNING *', [request.body.status, request.params.uuid])
   if (!result.rows.length) throw new Error('Pedido nao encontrado.')

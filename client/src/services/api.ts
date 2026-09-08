@@ -71,6 +71,7 @@ export const api = {
     list: () => request<PurchaseOrder[]>('GET', '/v1/purchase-orders'),
     get: (uuid: string) => request<PurchaseOrder>('GET', `/v1/purchase-orders/${uuid}`),
     create: (data: { supplierUuid: string; supplierName: string; items: Array<{ productUuid: string; name: string; quantity: number; unitCost: number }>; expectedDelivery?: string; notes?: string }) => request<PurchaseOrder>('POST', '/v1/purchase-orders', data),
+    update: (uuid: string, data: { supplierUuid?: string; supplierName?: string; items?: Array<{ productUuid: string; name: string; quantity: number; unitCost: number }>; expectedDelivery?: string; notes?: string }) => request<PurchaseOrder>('PUT', `/v1/purchase-orders/${uuid}`, data),
     updateStatus: (uuid: string, status: string) => request<PurchaseOrder>('PUT', `/v1/purchase-orders/${uuid}/status`, { status }),
     receiveItem: (uuid: string, productUuid: string, quantity: number) => request<PurchaseOrder>('POST', `/v1/purchase-orders/${uuid}/receive`, { productUuid, quantity }),
   },
