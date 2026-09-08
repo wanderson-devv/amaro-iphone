@@ -417,23 +417,47 @@ function ProductsPage() {
   const [barcodeValue, setBarcodeValue] = useState('')
   const [barcodeStatus, setBarcodeStatus] = useState<'idle' | 'searching' | 'found' | 'not-found'>('idle')
   const [foundProduct, setFoundProduct] = useState<Product | undefined>()
+  const [onlineData, setOnlineData] = useState<{ name?: string; category?: string; brand?: string; image?: string } | undefined>()
   const handleBarcodeScan = async (value: string) => {
-    if (!value.trim()) { setBarcodeStatus('idle'); setFoundProduct(undefined); return }
+    if (!value.trim()) { setBarcodeStatus('idle'); setFoundProduct(undefined); setOnlineData(undefined); return }
     setBarcodeStatus('searching')
     try {
       const all = await api.products.list()
       const found = all.find((p) => p.barcode === value.trim())
       if (found) {
         setFoundProduct(found)
+        setOnlineData(undefined)
         setBarcodeStatus('found')
-        setNotice(`Produto encontrado: ${found.name}`)
-      } else {
-        setFoundProduct(undefined)
-        setBarcodeStatus('not-found')
-        const barcodeInput = document.querySelector('input[name="barcode"]') as HTMLInputElement
-        if (barcodeInput) barcodeInput.value = value
+        return
       }
-    } catch { setBarcodeStatus('not-found') }
+      setFoundProduct(undefined)
+      let online: { name?: string; category?: string; brand?: string } | undefined
+      try {
+        const offRes = await fetch(`https://world.openfoodfacts.org/api/v2/product/${value.trim()}.json`)
+        const offData = await offRes.json()
+        if (offData.status === 1 && offData.product) {
+          const p = offData.product
+          online = { name: p.product_name || p.product_name_pt || undefined, category: p.categories || undefined, brand: p.brands || undefined }
+        }
+      } catch {}
+      if (!online?.name) {
+        try {
+          const upcRes = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${value.trim()}`)
+          const upcData = await upcRes.json()
+          if (upcData.items?.length) {
+            const item = upcData.items[0]
+            online = { name: item.title || undefined, category: item.category || undefined, brand: item.brand || undefined }
+          }
+        } catch {}
+      }
+      if (online?.name) {
+        setOnlineData(online)
+        setBarcodeStatus('found')
+      } else {
+        setOnlineData(undefined)
+        setBarcodeStatus('not-found')
+      }
+    } catch { setBarcodeStatus('not-found'); setOnlineData(undefined) }
   }
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const data = new FormData(event.currentTarget); const name = String(data.get('name') ?? '').trim()
@@ -442,7 +466,7 @@ function ProductsPage() {
       const created = await createProduct({ code: String(data.get('code') ?? '').trim() || `PRD-${Date.now()}`, sku: String(data.get('sku') ?? ''), barcode: String(data.get('barcode') ?? ''), name, category: String(data.get('category') ?? ''), cost: Number(data.get('cost') ?? 0), salePrice: Number(data.get('price') ?? 0), minStock: Number(data.get('minimum') ?? 0), unit: String(data.get('unit') ?? 'UN') })
       const initialStock = Number(data.get('stock') ?? 0)
       if (initialStock > 0 && created?.uuid) await adjustStock(created.uuid, initialStock, 'Estoque inicial')
-      reload(); event.currentTarget.reset(); setBarcodeValue(''); setBarcodeStatus('idle'); setFoundProduct(undefined); setNotice('Produto criado.')
+      reload(); event.currentTarget.reset(); setBarcodeValue(''); setBarcodeStatus('idle'); setFoundProduct(undefined); setOnlineData(undefined); setNotice('Produto criado.')
     } catch (error) { setNotice(error instanceof Error ? error.message : 'Erro ao cadastrar produto.') }
   }
   return (
@@ -452,13 +476,14 @@ function ProductsPage() {
           <div className="panel-header"><div><span className="eyebrow">CATALOGO</span><h2>Novo produto</h2></div></div>
           <div className="barcode-scanner-box">
             <div className="barcode-scanner-label"><ScanBarcode size={16} /><span>Leitor de codigo de barras</span></div>
-            <input className="barcode-scanner-input" type="text" placeholder="Escaneie ou digite o codigo de barras..." value={barcodeValue} onChange={(e) => { setBarcodeValue(e.target.value); if (barcodeStatus !== 'idle') { setBarcodeStatus('idle'); setFoundProduct(undefined) } }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleBarcodeScan(barcodeValue) } }} autoFocus />
+            <input className="barcode-scanner-input" type="text" placeholder="Escaneie ou digite o codigo de barras..." value={barcodeValue} onChange={(e) => { setBarcodeValue(e.target.value); if (barcodeStatus !== 'idle') { setBarcodeStatus('idle'); setFoundProduct(undefined); setOnlineData(undefined) } }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleBarcodeScan(barcodeValue) } }} autoFocus />
             {barcodeStatus === 'searching' && <small className="barcode-status searching">Buscando...</small>}
-            {barcodeStatus === 'found' && foundProduct && <small className="barcode-status found">Encontrado: <b>{foundProduct.name}</b> — {currency(foundProduct.salePrice)}</small>}
+            {barcodeStatus === 'found' && foundProduct && <small className="barcode-status found">Encontrado no catalogo: <b>{foundProduct.name}</b> — {currency(foundProduct.salePrice)}</small>}
+            {barcodeStatus === 'found' && onlineData && <small className="barcode-status found">Encontrado online: <b>{onlineData.name}</b>{onlineData.brand ? ` — ${onlineData.brand}` : ''}{onlineData.category ? ` · ${onlineData.category}` : ''}</small>}
             {barcodeStatus === 'not-found' && <small className="barcode-status not-found">Codigo nao encontrado. Preencha os dados para cadastrar.</small>}
           </div>
           <form onSubmit={submit}>
-            <label>Nome<input name="name" required placeholder="Ex.: Tela iPhone 13" defaultValue={foundProduct?.name ?? ''} /></label>
+            <label>Nome<input name="name" required placeholder="Ex.: Tela iPhone 13" defaultValue={foundProduct?.name ?? onlineData?.name ?? ''} /></label>
             <div className="form-row"><label>Codigo interno<input name="code" placeholder="Gerado se vazio" defaultValue={foundProduct?.code ?? ''} /></label><label>SKU<input name="sku" defaultValue={foundProduct?.sku ?? ''} /></label></div>
             <div className="form-row"><label>Custo<input name="cost" type="number" min="0" step="0.01" defaultValue={foundProduct?.cost ?? 0} /></label><label>Preco de venda<input name="price" type="number" min="0" step="0.01" defaultValue={foundProduct?.salePrice ?? 0} /></label></div>
             <div className="form-row"><label>Estoque minimo<input name="minimum" type="number" min="0" step="1" defaultValue={foundProduct?.minStock ?? 0} /></label><label>Estoque inicial<input name="stock" type="number" min="0" step="1" defaultValue="0" /></label></div>
