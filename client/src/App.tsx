@@ -417,7 +417,6 @@ function ProductsPage() {
   const [barcodeValue, setBarcodeValue] = useState('')
   const [barcodeStatus, setBarcodeStatus] = useState<'idle' | 'searching' | 'found' | 'not-found'>('idle')
   const [foundProduct, setFoundProduct] = useState<Product | undefined>()
-  const formRef = useState<HTMLFormElement | null>(null)[0]
   const handleBarcodeScan = async (value: string) => {
     if (!value.trim()) { setBarcodeStatus('idle'); setFoundProduct(undefined); return }
     setBarcodeStatus('searching')
