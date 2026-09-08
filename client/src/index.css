@@ -234,6 +234,8 @@ textarea { min-height: 67px; resize: vertical; }
 .barcode-status.found { color: #44b27a; }
 .barcode-status.found b { color: #1d5c3a; }
 .barcode-status.not-found { color: #dd5054; }
+.barcode-search-log { margin-top: 8px; padding: 8px 10px; background: #f0f6fb; border: 1px solid #d9e4ee; border-radius: var(--radius-sm); max-height: 120px; overflow-y: auto; }
+.barcode-search-log-item { font-size: 10px; color: #5a7a94; padding: 2px 0; font-family: monospace; }
 
 /* ── Lists ── */
 .list-panel { min-height: 425px; }

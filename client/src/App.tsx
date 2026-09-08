@@ -418,47 +418,75 @@ function ProductsPage() {
   const [barcodeStatus, setBarcodeStatus] = useState<'idle' | 'searching' | 'found' | 'not-found'>('idle')
   const [foundProduct, setFoundProduct] = useState<Product | undefined>()
   const [onlineData, setOnlineData] = useState<{ name?: string; category?: string; brand?: string; image?: string } | undefined>()
+  const [searchLog, setSearchLog] = useState<string[]>([])
   const handleBarcodeScan = async (value: string) => {
     const code = value.trim()
-    if (!code) { setBarcodeStatus('idle'); setFoundProduct(undefined); setOnlineData(undefined); return }
+    if (!code) { setBarcodeStatus('idle'); setFoundProduct(undefined); setOnlineData(undefined); setSearchLog([]); return }
     setBarcodeStatus('searching')
+    const logs: string[] = []
     try {
+      logs.push('Buscando no catalogo local...')
+      setSearchLog([...logs])
       const all = await api.products.list()
       const found = all.find((p) => p.barcode === code)
       if (found) {
-        setFoundProduct(found)
-        setOnlineData(undefined)
-        setBarcodeStatus('found')
+        setFoundProduct(found); setOnlineData(undefined); setBarcodeStatus('found'); setSearchLog([...logs, 'Encontrado no catalogo local!'])
         return
       }
+      logs.push('Catalogo local: nao encontrado')
       setFoundProduct(undefined)
       let online: { name?: string; category?: string; brand?: string } | undefined
+
+      logs.push('Buscando no Open Food Facts...')
+      setSearchLog([...logs])
       try {
         const offRes = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json`)
         const offData = await offRes.json()
-        if (offData.status === 1 && offData.product) {
+        if (offData.status === 1 && offData.product?.product_name) {
           const p = offData.product
           online = { name: p.product_name || p.product_name_pt || undefined, category: p.categories || undefined, brand: p.brands || undefined }
-        }
-      } catch {}
+          logs.push(`Open Food Facts: ${p.product_name}`)
+        } else { logs.push('Open Food Facts: nao encontrado') }
+      } catch (e) { logs.push('Open Food Facts: erro de conexao') }
+
       if (!online?.name) {
+        logs.push('Buscando no UPCitemdb...')
+        setSearchLog([...logs])
         try {
           const upcRes = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${code}`)
-          const upcData = await upcRes.json()
-          if (upcData.items?.length) {
-            const item = upcData.items[0]
-            online = { name: item.title || undefined, category: item.category || undefined, brand: item.brand || undefined }
-          }
-        } catch {}
+          if (upcRes.ok) {
+            const upcData = await upcRes.json()
+            if (upcData.items?.length) {
+              const item = upcData.items[0]
+              online = { name: item.title || undefined, category: item.category || undefined, brand: item.brand || undefined }
+              logs.push(`UPCitemdb: ${item.title}`)
+            } else { logs.push('UPCitemdb: nao encontrado') }
+          } else { logs.push(`UPCitemdb: HTTP ${upcRes.status}`) }
+        } catch (e) { logs.push('UPCitemdb: erro de conexao') }
       }
+
+      if (!online?.name) {
+        logs.push('Buscando no EAN-Search...')
+        setSearchLog([...logs])
+        try {
+          const eanRes = await fetch(`https://api.ean-search.org/api/v1?barcode=${code}&format=json`)
+          if (eanRes.ok) {
+            const eanData = await eanRes.json()
+            if (eanData.product) {
+              online = { name: eanData.product.name || undefined, category: eanData.product.category || undefined, brand: eanData.product.brand || undefined }
+              logs.push(`EAN-Search: ${eanData.product.name}`)
+            } else { logs.push('EAN-Search: nao encontrado') }
+          } else { logs.push(`EAN-Search: HTTP ${eanRes.status}`) }
+        } catch (e) { logs.push('EAN-Search: erro de conexao') }
+      }
+
+      setSearchLog([...logs])
       if (online?.name) {
-        setOnlineData(online)
-        setBarcodeStatus('found')
+        setOnlineData(online); setBarcodeStatus('found')
       } else {
-        setOnlineData(undefined)
-        setBarcodeStatus('not-found')
+        setOnlineData(undefined); setBarcodeStatus('not-found')
       }
-    } catch { setBarcodeStatus('not-found'); setOnlineData(undefined) }
+    } catch { setBarcodeStatus('not-found'); setOnlineData(undefined); setSearchLog([...logs, 'Erro geral']) }
   }
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const data = new FormData(event.currentTarget); const name = String(data.get('name') ?? '').trim()
@@ -479,9 +507,11 @@ function ProductsPage() {
             <div className="barcode-scanner-label"><ScanBarcode size={16} /><span>Leitor de codigo de barras</span></div>
             <input className="barcode-scanner-input" type="text" placeholder="Escaneie ou digite o codigo de barras..." value={barcodeValue} onChange={(e) => { setBarcodeValue(e.target.value); if (barcodeStatus !== 'idle') { setBarcodeStatus('idle'); setFoundProduct(undefined); setOnlineData(undefined) } }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); const val = (e.target as HTMLInputElement).value; handleBarcodeScan(val) } }} autoFocus />
             {barcodeStatus === 'searching' && <small className="barcode-status searching">Buscando...</small>}
+            {barcodeStatus === 'searching' && searchLog.length > 0 && <div className="barcode-search-log">{searchLog.map((log, i) => <div key={i} className="barcode-search-log-item">{log}</div>)}</div>}
             {barcodeStatus === 'found' && foundProduct && <small className="barcode-status found">Encontrado no catalogo: <b>{foundProduct.name}</b> — {currency(foundProduct.salePrice)}</small>}
             {barcodeStatus === 'found' && onlineData && <small className="barcode-status found">Encontrado online: <b>{onlineData.name}</b>{onlineData.brand ? ` — ${onlineData.brand}` : ''}{onlineData.category ? ` · ${onlineData.category}` : ''}</small>}
             {barcodeStatus === 'not-found' && <small className="barcode-status not-found">Codigo nao encontrado. Preencha os dados para cadastrar.</small>}
+            {barcodeStatus === 'not-found' && searchLog.length > 0 && <div className="barcode-search-log">{searchLog.map((log, i) => <div key={i} className="barcode-search-log-item">{log}</div>)}</div>}
           </div>
           <form onSubmit={submit}>
             <label>Nome<input name="name" required placeholder="Ex.: Tela iPhone 13" defaultValue={foundProduct?.name ?? onlineData?.name ?? ''} /></label>
