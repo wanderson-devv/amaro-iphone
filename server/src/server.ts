@@ -344,93 +344,127 @@ function mapFinancial(r: any) { return { uuid: r.uuid, type: r.type, status: r.s
 function mapSupplier(r: any) { return { uuid: r.uuid, name: r.name, document: r.document, phone: r.phone, email: r.email, address: r.address, notes: r.notes, createdAt: r.created_at, updatedAt: r.updated_at, deletedAt: r.deleted_at, createdBy: r.created_by, updatedBy: r.updated_by, syncStatus: 'synced' } }
 function mapPurchaseOrder(r: any) { return { uuid: r.uuid, number: r.number, supplierUuid: r.supplier_uuid, supplierName: r.supplier_name, status: r.status, items: r.items, total: Number(r.total), expectedDelivery: r.expected_delivery, notes: r.notes, createdAt: r.created_at, updatedAt: r.updated_at, deletedAt: r.deleted_at, createdBy: r.created_by, updatedBy: r.updated_by, syncStatus: 'synced' } }
 
-// Barcode Lookup - busca em multiplas fontes via backend (sem CORS)
+// Barcode Lookup - equipamentos eletronicos e assistencia tecnica
 app.get<{ Params: { code: string } }>('/v1/barcode-lookup/:code', { preHandler: requireAuth }, async (request) => {
   const code = request.params.code.trim()
   if (!code || code.length < 4) return { found: false, logs: ['Codigo invalido'] }
   const logs: string[] = []
-  const fetchWithTimeout = async (url: string, ms = 8000) => {
+  const fetchWithTimeout = async (url: string, ms = 10000) => {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), ms)
     try {
-      const res = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'AmaroIphone-ERP/1.0' } })
+      const res = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8' } })
       clearTimeout(timer)
       return res
     } catch (e) { clearTimeout(timer); throw e }
   }
 
-  // 1. Open Food Facts
+  // 1. Google Shopping Brasil - foco eletronicos
   try {
-    logs.push('Open Food Facts...')
+    logs.push('Google Shopping Brasil...')
+    const res = await fetchWithTimeout(`https://www.google.com/search?q=${code}+produto+eletronico&tbm=shop&hl=pt-BR&gl=br`)
+    const html = await res.text()
+    const titleMatch = html.match(/<h3[^>]*>([^<]+)<\/h3>/i)
+    const priceMatch = html.match(/R\$\s*[\d.,]+/i)
+    if (titleMatch) {
+      const result = { name: titleMatch[1].replace(/<[^>]+>/g, '').trim(), brand: '', category: 'Eletronicos', image: '' }
+      if (priceMatch) result.category += ` - ${priceMatch[0]}`
+      logs.push(`Encontrado: ${result.name}`)
+      return { found: true, source: 'Google Shopping', data: result, logs }
+    }
+    logs.push('Google Shopping: nenhum resultado')
+  } catch { logs.push('Google Shopping: erro de conexao') }
+
+  // 2. Google Search - busca por equipamento eletronico com EAN
+  try {
+    logs.push('Google Search (eletronicos)...')
+    const queries = [
+      `${code} celular tela bateria carregador`,
+      `${code} peca assistencia tecnica iphone samsung`,
+      `${code} acessorio eletronico`
+    ]
+    for (const q of queries) {
+      try {
+        const res = await fetchWithTimeout(`https://www.google.com/search?q=${encodeURIComponent(q)}&hl=pt-BR&gl=br`)
+        const html = await res.text()
+        const titleMatch = html.match(/<h3[^>]*>([^<]+)<\/h3>/i)
+        const snippetBlocks = html.match(/<div[^>]*class="[^"]*BNeawe[^"]*"[^>]*>([^<]+)<\/div>/gi) || []
+        let snippet = ''
+        for (const block of snippetBlocks) {
+          const text = block.replace(/<[^>]+>/g, '').trim()
+          if (text.length > 20 && text.length < 200 && !text.includes('http') && !text.includes('cookie')) {
+            snippet = text; break
+          }
+        }
+        if (titleMatch) {
+          const name = titleMatch[1].replace(/<[^>]+>/g, '').trim()
+          if (name.length > 3 && !name.includes('Google') && !name.includes('Pesquisa')) {
+            const result = { name, brand: snippet || '', category: 'Equipamento eletronico', image: '' }
+            logs.push(`Encontrado: ${result.name}`)
+            return { found: true, source: 'Google', data: result, logs }
+          }
+        }
+      } catch {}
+    }
+    logs.push('Google Search: nenhum resultado util')
+  } catch { logs.push('Google Search: erro') }
+
+  // 3. Mercado Livre API publica
+  try {
+    logs.push('Mercado Livre...')
+    const res = await fetchWithTimeout(`https://api.mercadolibre.com/sites/MLB/search?q=${code}&limit=3`)
+    const data = await res.json() as any
+    if (data.results?.length) {
+      const item = data.results[0]
+      const result = { name: item.title || '', brand: item.attributes?.find((a: any) => a.id === 'BRAND')?.value_name || '', category: item.category_id || 'Eletronicos', image: item.thumbnail || '' }
+      logs.push(`Encontrado: ${result.name}`)
+      return { found: true, source: 'Mercado Livre', data: result, logs }
+    }
+    logs.push('Mercado Livre: nenhum resultado')
+  } catch { logs.push('Mercado Livre: erro') }
+
+  // 4. Busca por prefixo EAN (identifica fabricante)
+  try {
+    logs.push('Identificando fabricante pelo prefixo EAN...')
+    const prefix = code.substring(0, 3)
+    const manufacturers: Record<string, string> = {
+      '789': 'Brasil', '790': 'Brasil', '779': 'Argentina', '750': 'Mexico',
+      '000': 'USA/Canade', '001': 'USA/Canade', '002': 'USA/Canade', '003': 'USA/Canade',
+      '060': 'USA/Canade', '061': 'USA/Canade', '062': 'USA/Canade', '063': 'USA/Canade',
+      '400': 'Alemanha', '401': 'Alemanha', '402': 'Alemanha',
+      '880': 'Coreia do Sul', '881': 'Coreia do Sul',
+      '690': 'China', '691': 'China', '692': 'China', '693': 'China', '694': 'China', '695': 'China',
+      '450': 'Japao', '451': 'Japao', '452': 'Japao', '453': 'Japao', '454': 'Japao', '455': 'Japao', '456': 'Japao',
+      '885': 'Tailandia', '886': 'Taiwan',
+      '500': 'Reino Unido', '501': 'Reino Unido',
+      '840': 'Espanha', '841': 'Espanha',
+      '800': 'Italia', '801': 'Italia', '802': 'Italia', '803': 'Italia', '804': 'Italia', '805': 'Italia', '806': 'Italia', '807': 'Italia', '808': 'Italia', '809': 'Italia',
+      '300': 'Franca', '301': 'Franca', '302': 'Franca', '303': 'Franca', '304': 'Franca', '305': 'Franca', '306': 'Franca', '307': 'Franca', '308': 'Franca', '309': 'Franca',
+      '620': 'Singapura',
+      '950': 'EUA (UPC)'
+    }
+    const country = manufacturers[prefix] || 'Desconhecido'
+    logs.push(`Pais de origem: ${country} (prefixo ${prefix})`)
+    if (['690', '691', '692', '693', '694', '695', '880', '881', '885', '886'].includes(prefix)) {
+      logs.push('Fabricante provavel: fabricante asiatico (celulares, acessorios)')
+    } else if (['789', '790', '779', '750'].includes(prefix)) {
+      logs.push('Fabricante provavel: fabricante americas')
+    }
+  } catch {}
+
+  // 5. Open Food Facts (fallback final - so alimentos)
+  try {
+    logs.push('Open Food Facts (fallback)...')
     const res = await fetchWithTimeout(`https://world.openfoodfacts.org/api/v2/product/${code}.json`)
     const data = await res.json() as any
     if (data.status === 1 && data.product?.product_name) {
       const p = data.product
-      const result = { name: p.product_name || p.product_name_pt || '', brand: p.brands || '', category: p.categories || '', image: p.image_url || '' }
-      logs.push(`Encontrado: ${result.name}`)
+      const result = { name: p.product_name || p.product_name_pt || '', brand: p.brands || '', category: 'Alimento', image: p.image_url || '' }
+      logs.push(`Encontrado (alimento): ${result.name}`)
       return { found: true, source: 'Open Food Facts', data: result, logs }
     }
-    logs.push('Open Food Facts: nao encontrado')
+    logs.push('Open Food Facts: nenhum resultado')
   } catch { logs.push('Open Food Facts: erro') }
-
-  // 2. Open Products Facts
-  try {
-    logs.push('Open Products Facts...')
-    const res = await fetchWithTimeout(`https://world.openproductsfacts.org/api/v2/product/${code}.json`)
-    const data = await res.json() as any
-    if (data.status === 1 && data.product?.product_name) {
-      const p = data.product
-      const result = { name: p.product_name || '', brand: p.brands || '', category: p.categories || '', image: p.image_url || '' }
-      logs.push(`Encontrado: ${result.name}`)
-      return { found: true, source: 'Open Products Facts', data: result, logs }
-    }
-    logs.push('Open Products Facts: nao encontrado')
-  } catch { logs.push('Open Products Facts: erro') }
-
-  // 3. UPCitemdb (trial)
-  try {
-    logs.push('UPCitemdb...')
-    const res = await fetchWithTimeout(`https://api.upcitemdb.com/prod/trial/lookup?upc=${code}`)
-    if (res.ok) {
-      const data = await res.json() as any
-      if (data.items?.length) {
-        const item = data.items[0]
-        const result = { name: item.title || '', brand: item.brand || '', category: item.category || '', image: item.images?.[0] || '' }
-        logs.push(`Encontrado: ${result.name}`)
-        return { found: true, source: 'UPCitemdb', data: result, logs }
-      }
-    }
-    logs.push(`UPCitemdb: ${res.ok ? 'nao encontrado' : 'HTTP ' + res.status}`)
-  } catch { logs.push('UPCitemdb: erro') }
-
-  // 4. Google Shopping (scraping simples)
-  try {
-    logs.push('Google Shopping...')
-    const res = await fetchWithTimeout(`https://www.google.com/search?q=${code}+produto&tbm=shop&hl=pt-BR`)
-    const html = await res.text()
-    const titleMatch = html.match(/<h3[^>]*>([^<]+)<\/h3>/i)
-    if (titleMatch) {
-      const result = { name: titleMatch[1].trim(), brand: '', category: '', image: '' }
-      logs.push(`Encontrado: ${result.name}`)
-      return { found: true, source: 'Google Shopping', data: result, logs }
-    }
-    logs.push('Google Shopping: nao encontrado')
-  } catch { logs.push('Google Shopping: erro') }
-
-  // 5. Busca geral Google
-  try {
-    logs.push('Google Search...')
-    const res = await fetchWithTimeout(`https://www.google.com/search?q=${code}+product+info&hl=pt-BR`)
-    const html = await res.text()
-    const titleMatch = html.match(/<h3[^>]*>([^<]+)<\/h3>/i)
-    const snippetMatch = html.match(/<span[^>]*class="[^"]*"[^>]*>([^<]{20,150})<\/span>/i)
-    if (titleMatch) {
-      const result = { name: titleMatch[1].trim(), brand: snippetMatch ? snippetMatch[1].trim() : '', category: '', image: '' }
-      logs.push(`Encontrado: ${result.name}`)
-      return { found: true, source: 'Google', data: result, logs }
-    }
-    logs.push('Google: nao encontrado')
-  } catch { logs.push('Google: erro') }
 
   return { found: false, logs }
 })
