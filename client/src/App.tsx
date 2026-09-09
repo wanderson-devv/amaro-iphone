@@ -435,55 +435,30 @@ function ProductsPage() {
       }
       logs.push('Catalogo local: nao encontrado')
       setFoundProduct(undefined)
-      let online: { name?: string; category?: string; brand?: string } | undefined
 
-      logs.push('Buscando no Open Food Facts...')
+      logs.push('Buscando online via backend...')
       setSearchLog([...logs])
       try {
-        const offRes = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json`)
-        const offData = await offRes.json()
-        if (offData.status === 1 && offData.product?.product_name) {
-          const p = offData.product
-          online = { name: p.product_name || p.product_name_pt || undefined, category: p.categories || undefined, brand: p.brands || undefined }
-          logs.push(`Open Food Facts: ${p.product_name}`)
-        } else { logs.push('Open Food Facts: nao encontrado') }
-      } catch (e) { logs.push('Open Food Facts: erro de conexao') }
-
-      if (!online?.name) {
-        logs.push('Buscando no UPCitemdb...')
+        const token = localStorage.getItem('amaro_token')
+        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/v1/barcode-lookup/${code}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        const data = await res.json()
+        if (data.logs) logs.push(...data.logs.filter((l: string) => !logs.includes(l)))
         setSearchLog([...logs])
-        try {
-          const upcRes = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${code}`)
-          if (upcRes.ok) {
-            const upcData = await upcRes.json()
-            if (upcData.items?.length) {
-              const item = upcData.items[0]
-              online = { name: item.title || undefined, category: item.category || undefined, brand: item.brand || undefined }
-              logs.push(`UPCitemdb: ${item.title}`)
-            } else { logs.push('UPCitemdb: nao encontrado') }
-          } else { logs.push(`UPCitemdb: HTTP ${upcRes.status}`) }
-        } catch (e) { logs.push('UPCitemdb: erro de conexao') }
-      }
-
-      if (!online?.name) {
-        logs.push('Buscando em Open Products Facts...')
+        if (data.found && data.data) {
+          const online = { name: data.data.name || undefined, category: data.data.category || undefined, brand: data.data.brand || undefined }
+          setOnlineData(online)
+          setBarcodeStatus('found')
+        } else {
+          setOnlineData(undefined)
+          setBarcodeStatus('not-found')
+        }
+      } catch {
+        logs.push('Backend: erro de conexao')
         setSearchLog([...logs])
-        try {
-          const opfRes = await fetch(`https://world.openproductsfacts.org/api/v2/product/${code}.json`)
-          const opfData = await opfRes.json()
-          if (opfData.status === 1 && opfData.product?.product_name) {
-            const p = opfData.product
-            online = { name: p.product_name || undefined, category: p.categories || undefined, brand: p.brands || undefined }
-            logs.push(`Open Products Facts: ${p.product_name}`)
-          } else { logs.push('Open Products Facts: nao encontrado') }
-        } catch (e) { logs.push('Open Products Facts: erro de conexao') }
-      }
-
-      setSearchLog([...logs])
-      if (online?.name) {
-        setOnlineData(online); setBarcodeStatus('found')
-      } else {
-        setOnlineData(undefined); setBarcodeStatus('not-found')
+        setOnlineData(undefined)
+        setBarcodeStatus('not-found')
       }
     } catch { setBarcodeStatus('not-found'); setOnlineData(undefined); setSearchLog([...logs, 'Erro geral']) }
   }
