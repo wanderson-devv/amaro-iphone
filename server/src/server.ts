@@ -359,71 +359,51 @@ app.get<{ Params: { code: string } }>('/v1/barcode-lookup/:code', { preHandler: 
     } catch (e) { clearTimeout(timer); throw e }
   }
 
-  // 1. Google Shopping Brasil - foco eletronicos
+  // 1. DuckDuckGo HTML - busca por produto com nome/marca
   try {
-    logs.push('Google Shopping Brasil...')
-    const res = await fetchWithTimeout(`https://www.google.com/search?q=${code}+produto+eletronico&tbm=shop&hl=pt-BR&gl=br`)
+    logs.push('DuckDuckGo (produto)...')
+    const ddgUrl = `https://html.duckduckgo.com/html/?q=${code}+produto+nome+marca`
+    const res = await fetchWithTimeout(ddgUrl)
     const html = await res.text()
-    const titleMatch = html.match(/<h3[^>]*>([^<]+)<\/h3>/i)
-    const priceMatch = html.match(/R\$\s*[\d.,]+/i)
-    if (titleMatch) {
-      const result = { name: titleMatch[1].replace(/<[^>]+>/g, '').trim(), brand: '', category: 'Eletronicos', image: '' }
-      if (priceMatch) result.category += ` - ${priceMatch[0]}`
+    const titleMatches = html.match(/<a[^>]*class="result__a"[^>]*>([^<]+)<\/a>/gi) || []
+    const snippetMatches = html.match(/<a[^>]*class="result__snippet"[^>]*>([^<]+)<\/a>/gi) || []
+    const titles = titleMatches.map(m => m.replace(/<[^>]+>/g, '').trim()).filter(t => t.length > 5 && !t.includes('DuckDuckGo') && !t.includes('Pesquisa'))
+    const snippets = snippetMatches.map(m => m.replace(/<[^>]+>/g, '').trim())
+    if (titles.length > 0) {
+      const result = { name: titles[0], brand: snippets[0] || '', category: 'Produto', image: '' }
       logs.push(`Encontrado: ${result.name}`)
-      return { found: true, source: 'Google Shopping', data: result, logs }
+      return { found: true, source: 'DuckDuckGo', data: result, logs }
     }
-    logs.push('Google Shopping: nenhum resultado')
-  } catch { logs.push('Google Shopping: erro de conexao') }
+    logs.push('DuckDuckGo: nenhum resultado')
+  } catch { logs.push('DuckDuckGo: erro de conexao') }
 
-  // 2. Google Search - busca por equipamento eletronico com EAN
+  // 2. DuckDuckGo - busca por equipamento eletronico
   try {
-    logs.push('Google Search (eletronicos)...')
+    logs.push('DuckDuckGo (eletronicos)...')
     const queries = [
       `${code} celular tela bateria carregador`,
-      `${code} peca assistencia tecnica iphone samsung`,
+      `${code} peca assistencia tecnica`,
       `${code} acessorio eletronico`
     ]
     for (const q of queries) {
       try {
-        const res = await fetchWithTimeout(`https://www.google.com/search?q=${encodeURIComponent(q)}&hl=pt-BR&gl=br`)
+        const res = await fetchWithTimeout(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`)
         const html = await res.text()
-        const titleMatch = html.match(/<h3[^>]*>([^<]+)<\/h3>/i)
-        const snippetBlocks = html.match(/<div[^>]*class="[^"]*BNeawe[^"]*"[^>]*>([^<]+)<\/div>/gi) || []
-        let snippet = ''
-        for (const block of snippetBlocks) {
-          const text = block.replace(/<[^>]+>/g, '').trim()
-          if (text.length > 20 && text.length < 200 && !text.includes('http') && !text.includes('cookie')) {
-            snippet = text; break
-          }
-        }
-        if (titleMatch) {
-          const name = titleMatch[1].replace(/<[^>]+>/g, '').trim()
-          if (name.length > 3 && !name.includes('Google') && !name.includes('Pesquisa')) {
-            const result = { name, brand: snippet || '', category: 'Equipamento eletronico', image: '' }
-            logs.push(`Encontrado: ${result.name}`)
-            return { found: true, source: 'Google', data: result, logs }
-          }
+        const titleMatches = html.match(/<a[^>]*class="result__a"[^>]*>([^<]+)<\/a>/gi) || []
+        const snippetMatches = html.match(/<a[^>]*class="result__snippet"[^>]*>([^<]+)<\/a>/gi) || []
+        const titles = titleMatches.map(m => m.replace(/<[^>]+>/g, '').trim()).filter(t => t.length > 5 && !t.includes('DuckDuckGo') && !t.includes('Pesquisa') && !t.includes('Google'))
+        const snippets = snippetMatches.map(m => m.replace(/<[^>]+>/g, '').trim())
+        if (titles.length > 0) {
+          const result = { name: titles[0], brand: snippets[0] || '', category: 'Equipamento eletronico', image: '' }
+          logs.push(`Encontrado: ${result.name}`)
+          return { found: true, source: 'DuckDuckGo', data: result, logs }
         }
       } catch {}
     }
-    logs.push('Google Search: nenhum resultado util')
-  } catch { logs.push('Google Search: erro') }
+    logs.push('DuckDuckGo eletronicos: nenhum resultado')
+  } catch { logs.push('DuckDuckGo eletronicos: erro') }
 
-  // 3. Mercado Livre API publica
-  try {
-    logs.push('Mercado Livre...')
-    const res = await fetchWithTimeout(`https://api.mercadolibre.com/sites/MLB/search?q=${code}&limit=3`)
-    const data = await res.json() as any
-    if (data.results?.length) {
-      const item = data.results[0]
-      const result = { name: item.title || '', brand: item.attributes?.find((a: any) => a.id === 'BRAND')?.value_name || '', category: item.category_id || 'Eletronicos', image: item.thumbnail || '' }
-      logs.push(`Encontrado: ${result.name}`)
-      return { found: true, source: 'Mercado Livre', data: result, logs }
-    }
-    logs.push('Mercado Livre: nenhum resultado')
-  } catch { logs.push('Mercado Livre: erro') }
-
-  // 4. Busca por prefixo EAN (identifica fabricante)
+  // 3. Identificacao pelo prefixo EAN
   try {
     logs.push('Identificando fabricante pelo prefixo EAN...')
     const prefix = code.substring(0, 3)
@@ -440,19 +420,18 @@ app.get<{ Params: { code: string } }>('/v1/barcode-lookup/:code', { preHandler: 
       '840': 'Espanha', '841': 'Espanha',
       '800': 'Italia', '801': 'Italia', '802': 'Italia', '803': 'Italia', '804': 'Italia', '805': 'Italia', '806': 'Italia', '807': 'Italia', '808': 'Italia', '809': 'Italia',
       '300': 'Franca', '301': 'Franca', '302': 'Franca', '303': 'Franca', '304': 'Franca', '305': 'Franca', '306': 'Franca', '307': 'Franca', '308': 'Franca', '309': 'Franca',
-      '620': 'Singapura',
-      '950': 'EUA (UPC)'
+      '620': 'Singapura', '950': 'EUA (UPC)'
     }
     const country = manufacturers[prefix] || 'Desconhecido'
     logs.push(`Pais de origem: ${country} (prefixo ${prefix})`)
     if (['690', '691', '692', '693', '694', '695', '880', '881', '885', '886'].includes(prefix)) {
-      logs.push('Fabricante provavel: fabricante asiatico (celulares, acessorios)')
+      logs.push('Tipo provavel: fabricante asiatico (celulares, acessorios)')
     } else if (['789', '790', '779', '750'].includes(prefix)) {
-      logs.push('Fabricante provavel: fabricante americas')
+      logs.push('Tipo provavel: fabricante americas')
     }
   } catch {}
 
-  // 5. Open Food Facts (fallback final - so alimentos)
+  // 4. Open Food Facts (fallback)
   try {
     logs.push('Open Food Facts (fallback)...')
     const res = await fetchWithTimeout(`https://world.openfoodfacts.org/api/v2/product/${code}.json`)
