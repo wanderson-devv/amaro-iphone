@@ -1,16 +1,13 @@
 import type { Channel } from '../data'
 
-export type SyncResource = 'orders' | 'settlements' | 'inventory' | 'listings' | 'ads'
+export type SyncResource = 'orders' | 'settlements' | 'inventory' | 'listings'
 
 export const syncResources: { key: SyncResource; label: string; scope: string }[] = [
-  { key: 'orders', label: 'Pedidos e extrato', scope: 'Orders:Advanced · Finance:Read' },
+  { key: 'orders', label: 'Pedidos', scope: 'Orders:Advanced' },
   { key: 'settlements', label: 'Repasses e conciliação', scope: 'Finance:Read' },
-  { key: 'inventory', label: 'Estoque FBA e DBA', scope: 'Inventory:Read' },
-  { key: 'listings', label: 'Catálogo e anúncios', scope: 'Listings:Read' },
-  { key: 'ads', label: 'Campanhas de anúncios', scope: 'Advertising:Read' },
+  { key: 'inventory', label: 'Estoque FBA', scope: 'Inventory:Read' },
+  { key: 'listings', label: 'Catálogo e anúncios', scope: 'Product Listing' },
 ]
-
-export type SyncMode = 'simulado' | 'producao'
 
 export type SyncStatus = 'aguardando' | 'em curso' | 'ok' | 'erro'
 
@@ -27,7 +24,6 @@ export type ProbeResult = { ok: boolean; detail: string }
 
 export interface ChannelConnector {
   readonly channel: Channel
-  readonly mode: SyncMode
   probe(): Promise<ProbeResult>
   fetch(resource: SyncResource, since: string): Promise<FetchResult>
 }

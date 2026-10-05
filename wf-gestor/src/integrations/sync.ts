@@ -1,25 +1,63 @@
-import { AmazonSpApiConnector, MockAmazonConnector } from './amazon/connector'
+import { AmazonSpApiConnector } from './amazon/connector'
 import type { ChannelConnector, SyncState } from './types'
 import { SyncError, syncResources } from './types'
 
-const STORAGE_KEY = 'wf.lastSync.Amazon'
+const LAST_SYNC_KEY = 'wf.lastSync.Amazon'
+const SNAPSHOT_KEY = 'wf.amazon.sync'
 
 const since30d = () => new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
 
 export function getAmazonConnector(): ChannelConnector {
-  return import.meta.env.VITE_SP_API_PROXY ? new AmazonSpApiConnector() : new MockAmazonConnector()
+  return new AmazonSpApiConnector()
 }
 
 export function idleStates(): SyncState[] {
   return syncResources.map((item) => ({ resource: item.key, status: 'aguardando', count: 0 }))
 }
 
-export function readLastSync(): string | null {
+function read(key: string): string | null {
   try {
-    return localStorage.getItem(STORAGE_KEY)
+    return localStorage.getItem(key)
   } catch {
     return null
   }
+}
+
+function write(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    /* armazenamento indisponível */
+  }
+}
+
+export function readLastSync(): string | null {
+  return read(LAST_SYNC_KEY)
+}
+
+export function readSyncSnapshot(): Record<string, number> | null {
+  const raw = read(SNAPSHOT_KEY)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as Record<string, number>
+  } catch {
+    return null
+  }
+}
+
+export function hydrateStates(): SyncState[] {
+  const snapshot = readSyncSnapshot()
+  if (!snapshot) return idleStates()
+  return idleStates().map((item) =>
+    snapshot[item.resource] === undefined
+      ? item
+      : {
+          ...item,
+          status: 'ok',
+          count: snapshot[item.resource],
+          detail: 'salvo da última sincronização',
+        },
+  )
 }
 
 export type SyncOutcome = { ok: boolean; message: string; hint?: string }
@@ -35,7 +73,7 @@ export async function runAmazonSync(onUpdate: (states: SyncState[]) => void): Pr
   try {
     health = await connector.probe()
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Falha ao contactar o canal.'
+    const message = error instanceof Error ? error.message : 'Falha ao contactar o proxy da Amazon.'
     states[0].status = 'erro'
     states[0].detail = message
     emit()
@@ -44,7 +82,7 @@ export async function runAmazonSync(onUpdate: (states: SyncState[]) => void): Pr
 
   for (const [index, item] of syncResources.entries()) {
     states[index].status = 'em curso'
-    states[index].detail = 'consultando…'
+    states[index].detail = 'consultando a Amazon…'
     emit()
 
     try {
@@ -67,16 +105,16 @@ export async function runAmazonSync(onUpdate: (states: SyncState[]) => void): Pr
   }
 
   const stamp = new Date().toLocaleString('pt-BR')
-  try {
-    localStorage.setItem(STORAGE_KEY, stamp)
-  } catch {
-    /* armazenamento indisponível */
-  }
+  write(LAST_SYNC_KEY, stamp)
+  write(
+    SNAPSHOT_KEY,
+    JSON.stringify(Object.fromEntries(states.map((item) => [item.resource, item.count]))),
+  )
 
   const total = states.reduce((sum, item) => sum + item.count, 0)
   return {
     ok: true,
-    message: `${connector.mode === 'simulado' ? 'Sincronização simulada' : 'Sincronização'} concluída · ${total} registros · ${stamp}`,
+    message: `Sincronização concluída · ${total} registros · ${stamp}`,
     hint: health.detail,
   }
 }

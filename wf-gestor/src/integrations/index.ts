@@ -1,4 +1,11 @@
 export * from './types'
-export { AmazonSpApiConnector, MockAmazonConnector } from './amazon/connector'
-export { getAmazonConnector, idleStates, readLastSync, runAmazonSync } from './sync'
+export { AmazonSpApiConnector, readProxyUrl, writeProxyUrl } from './amazon/connector'
+export {
+  getAmazonConnector,
+  hydrateStates,
+  idleStates,
+  readLastSync,
+  readSyncSnapshot,
+  runAmazonSync,
+} from './sync'
 export type { SyncOutcome } from './sync'

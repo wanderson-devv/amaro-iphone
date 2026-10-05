@@ -1,12 +1,13 @@
 import { useState } from 'react'
-import { CheckCircle2, CircleHelp, Link, RefreshCw, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, CircleHelp, Link, RefreshCw, Save, ShieldCheck } from 'lucide-react'
 import { accounts, num, type Channel } from '../data'
 import {
-  getAmazonConnector,
-  idleStates,
+  hydrateStates,
   readLastSync,
+  readProxyUrl,
   runAmazonSync,
   syncResources,
+  writeProxyUrl,
   type SyncOutcome,
   type SyncState,
 } from '../integrations'
@@ -29,11 +30,22 @@ const capabilities: Record<Channel, string[]> = {
 export default function IntegrationsPage() {
   const [state, setState] = useState(accounts)
   const [notice, setNotice] = useState('')
-  const [amazonStates, setAmazonStates] = useState<SyncState[]>(idleStates)
+  const [amazonStates, setAmazonStates] = useState<SyncState[]>(hydrateStates)
   const [running, setRunning] = useState(false)
   const [outcome, setOutcome] = useState<SyncOutcome | null>(null)
   const [lastSync, setLastSync] = useState<string | null>(() => readLastSync())
-  const mode = getAmazonConnector().mode
+  const [proxyUrl, setProxyUrl] = useState(() => readProxyUrl())
+  const configured = Boolean(proxyUrl)
+
+  const saveProxy = () => {
+    writeProxyUrl(proxyUrl)
+    setProxyUrl(readProxyUrl())
+    setNotice(
+      readProxyUrl()
+        ? 'Endereço do proxy salvo. A sincronização usará essa URL.'
+        : 'Endereço do proxy limpo. Informe o endereço do servidor para sincronizar.',
+    )
+  }
 
   const run = async () => {
     if (running) return
@@ -63,13 +75,9 @@ export default function IntegrationsPage() {
   }
 
   const sync = () => {
-    if (mode === 'producao') {
-      void run()
-      return
-    }
-    setState((current) => current.map((account) => ({ ...account, lastSync: 'agora mesmo' })))
-    setNotice('Sincronização executada em todos os canais conectados.')
     void run()
+    setState((current) => current.map((account) => ({ ...account, lastSync: 'agora mesmo' })))
+    setNotice('Sincronização solicitada em todos os canais conectados.')
   }
 
   const syncChannel = (channel: Channel) => {
@@ -108,11 +116,11 @@ export default function IntegrationsPage() {
 
       <Panel
         title="Sincronização Amazon"
-        hint={mode === 'simulado' ? 'Modo simulado' : 'Produção · SP-API'}
+        hint="Selling Partner API"
         className="sync-run"
         action={
           <div className="sync-run-actions">
-            <Tag value={mode === 'simulado' ? 'Simulado' : 'Produção'} />
+            <Tag value={configured ? 'Proxy ativo' : 'Sem proxy'} />
             <button className="primary" onClick={() => void run()} disabled={running}>
               <RefreshCw size={16} className={running ? 'spin' : ''} />
               {running ? 'Sincronizando…' : 'Executar sincronização'}
@@ -120,6 +128,21 @@ export default function IntegrationsPage() {
           </div>
         }
       >
+        <div className="proxy-config">
+          <label>
+            <span>URL do proxy SP-API (servidor wf-gestor/server)</span>
+            <input
+              value={proxyUrl}
+              onChange={(event) => setProxyUrl(event.target.value)}
+              placeholder="http://localhost:8787"
+              spellCheck={false}
+            />
+          </label>
+          <button className="ghost lg" onClick={saveProxy}>
+            <Save size={14} /> Salvar
+          </button>
+        </div>
+
         <ul className="sync-run-list">
           {amazonStates.map((item) => {
             const meta = syncResources.find((resource) => resource.key === item.resource)!
@@ -148,9 +171,8 @@ export default function IntegrationsPage() {
 
         <div className="sync-run-foot">
           <span className="sync-mode">
-            {mode === 'simulado'
-              ? 'Sem credenciais no navegador: os dados são gerados localmente até o proxy SP-API estar no ar.'
-              : 'Credenciais LWA mantidas no servidor proxy; o navegador só recebe o resultado.'}
+            As credenciais LWA (client_id, client_secret e refresh token) ficam apenas no servidor proxy — o navegador
+            recebe somente o resultado de cada consulta.
           </span>
           <span className="last-sync">Última execução: {lastSync ?? 'nunca'}</span>
         </div>

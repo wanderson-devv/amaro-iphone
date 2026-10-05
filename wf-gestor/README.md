@@ -23,44 +23,51 @@ Requisitos no GitHub: **Settings → Pages → Source = GitHub Actions** (o mesm
 
 O `vite.config.ts` usa `base: './'`, então os assets funcionam nesse subcaminho sem ajuste extra.
 
-## Sincronização com a Amazon
+## Sincronização com a Amazon (SP-API real)
 
-A camada de integração fica em `src/integrations/`:
+Não existe modo simulado: o painel só consulta a **Selling Partner API** por meio do proxy em `wf-gestor/server/`.
 
-| Arquivo | Papel |
+| Pasta | Papel |
 | --- | --- |
-| `types.ts` | Contrato `ChannelConnector`, recursos sincronizáveis e erros |
-| `amazon/connector.ts` | `MockAmazonConnector` (simulado) e `AmazonSpApiConnector` (produção) |
-| `sync.ts` | Motor de sincronização, progresso por recurso e última execução |
+| `src/integrations/types.ts` | Contrato `ChannelConnector`, recursos e erros |
+| `src/integrations/amazon/connector.ts` | `AmazonSpApiConnector` (chama o proxy) + URL do proxy |
+| `src/integrations/sync.ts` | Motor de sincronização, progresso, última execução |
+| `server/` | Proxy Fastify que guarda as credenciais LWA e fala com a Amazon |
 
-### Modo simulado (padrão)
+Rotas do proxy:
 
-Sem variável de ambiente configurada, o app usa `MockAmazonConnector`: as cinco etapas rodam com atraso realista e contam registros gerados localmente. Nenhuma requisição externa é feita.
+```
+GET /health                     → status do serviço
+GET /amazon/health              → credenciais configuradas?
+GET /amazon/orders?since=       → Orders API        (paginado, até 10 páginas)
+GET /amazon/settlements?since=  → Finances API      (financialEvents, fallback summaries)
+GET /amazon/inventory?since=    → FBA Inventory     (summaries)
+GET /amazon/listings?since=     → Listings Items    (precisa SP_API_SELLER_ID)
+```
 
-### Modo produção (SP-API)
-
-Defina no build:
+### Rodar o proxy
 
 ```bash
-VITE_SP_API_PROXY=https://api.seudominio.com
+cd wf-gestor/server
+cp .env.example .env     # preencha as credenciais LWA
+npm install
+npm run dev              # http://localhost:8787
 ```
 
-O `AmazonSpApiConnector` passa a chamar:
+No painel (Integrações → Sincronização Amazon), informe `http://localhost:8787` em **URL do proxy** e clique em Salvar, depois **Executar sincronização**.
 
-```
-GET {VITE_SP_API_PROXY}/amazon/health
-GET {VITE_SP_API_PROXY}/amazon/orders?since=AAAA-MM-DD
-GET {VITE_SP_API_PROXY}/amazon/settlements?since=...
-GET {VITE_SP_API_PROXY}/amazon/inventory?since=...
-GET {VITE_SP_API_PROXY}/amazon/listings?since=...
-GET {VITE_SP_API_PROXY}/amazon/ads?since=...
-```
+### Passo a passo para obter as credenciais
 
-**Importante:** o proxy (backend) é quem guarda as credenciais LWA (`client_id`, `client_secret`, `refresh_token`) do app registrado em Seller Central. Esses segredos nunca podem entrar no código do navegador ou em variáveis `VITE_*` expostas.
+1. Entre em Seller Central → **Configurações** → **Usar meus dados (API)** → registre-se como desenvolvedor.
+2. Em **Central de Desenvolvedores**, crie um perfil de desenvolvedor (privado, para uso na própria loja).
+3. Registre a aplicação: anote o **LWA client id** e o **LWA client secret**.
+4. Gere o **refresh token** fazendo a autorização da própria conta (fluxo de autoautorização de app privado).
+5. Marque os papéis necessários: **Orders**, **Finance and Accounting**, **Inventory**, **Product Listing**.
+6. Preencha `SP_API_CLIENT_ID`, `SP_API_CLIENT_SECRET`, `SP_API_REFRESH_TOKEN`, `SP_API_SELLER_ID` no `.env` (Brasil já vem como `SP_API_MARKETPLACE_ID=A2Q3Y263D00KWC`).
+7. Suba o proxy em um host com HTTPS (Railway, Render, Fly.io…) e libere o endereço do GitHub Pages em `CORS_ORIGIN`.
+8. No painel, troque `http://localhost:8787` pela URL pública e execute a sincronização.
 
-Checklist para produção:
+**Importante:** o proxy é o único lugar com os segredos LWA. Nunca os coloque em `VITE_*` ou no código do navegador.
 
-1. Criar conta de desenvolvedor e registrar o app em Seller Central ( Selling Partner API ).
-2. Obter LWA app ID, client secret e refresh token.
-3. Implementar o proxy com os escopos usados em `syncResources` (`Orders:Advanced`, `Finance:Read`, `Inventory:Read`, `Listings:Read`, `Advertising:Read`).
-4. Publicar o proxy e apontar `VITE_SP_API_PROXY` para ele.
+Escopos usados por recurso: `Orders:Advanced`, `Finance and Accounting`, `Inventory`, `Product Listing`. A API de Anúncios (Ads) é um serviço separado e ainda não está neste proxy.
+
