@@ -2,7 +2,11 @@ import type { ChannelConnector, FetchResult, ProbeResult, SyncResource } from '.
 import { SyncError } from '../types'
 
 const STORE_KEY = 'wf.spApiProxy'
-const FALLBACK = (import.meta.env.VITE_SP_API_PROXY as string | undefined) ?? ''
+const ENV_URL = (import.meta.env.VITE_SP_API_PROXY as string | undefined) ?? ''
+const LOCAL_URL = 'http://localhost:8787'
+const IS_LOCAL =
+  typeof location !== 'undefined' &&
+  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
 
 const normalize = (value: string) => value.trim().replace(/\/+$/, '')
 
@@ -13,7 +17,7 @@ export function readProxyUrl(): string {
   } catch {
     /* armazenamento indisponível */
   }
-  return normalize(FALLBACK)
+  return normalize(ENV_URL) || (IS_LOCAL ? LOCAL_URL : '')
 }
 
 export function writeProxyUrl(value: string) {

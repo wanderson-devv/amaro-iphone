@@ -39,11 +39,12 @@ export default function IntegrationsPage() {
 
   const saveProxy = () => {
     writeProxyUrl(proxyUrl)
-    setProxyUrl(readProxyUrl())
+    const saved = readProxyUrl()
+    setProxyUrl(saved)
     setNotice(
-      readProxyUrl()
-        ? 'Endereço do proxy salvo. A sincronização usará essa URL.'
-        : 'Endereço do proxy limpo. Informe o endereço do servidor para sincronizar.',
+      saved
+        ? `Endereço do proxy salvo: ${saved}. A sincronização usará esse servidor.`
+        : 'Campo limpo. Informe o endereço do proxy para sincronizar com a Amazon.',
     )
   }
 
