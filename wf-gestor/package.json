@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "proxy": "npm --prefix server run dev",
+    "proxy:start": "npm --prefix server run start",
+    "proxy:check": "npm --prefix server run check"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.1.0",

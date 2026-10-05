@@ -6,6 +6,12 @@ on:
     paths: ['client/**', 'wf-gestor/**']
   workflow_dispatch:
 
+# Apenas a tentativa mais nova conta: cancela runs antigos empilhados,
+# pois a fila do GitHub Pages so processa um deployment por vez.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
