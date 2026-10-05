@@ -3,14 +3,11 @@ name: Deploy Frontend to GitHub Pages
 on:
   push:
     branches: [main]
-    paths: ['client/**']
+    paths: ['client/**', 'wf-gestor/**']
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: client
 
     steps:
       - uses: actions/checkout@v4
@@ -19,10 +16,26 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: client/package-lock.json
+          cache-dependency-path: |
+            client/package-lock.json
+            wf-gestor/package-lock.json
 
-      - run: npm ci
-      - run: npm run build
+      - name: Build site principal
+        working-directory: client
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build WF Gestor
+        working-directory: wf-gestor
+        run: |
+          npm ci
+          npm run build
+
+      - name: Empacota WF Gestor em /wf-gestor
+        run: |
+          mkdir -p client/dist/wf-gestor
+          cp -r wf-gestor/dist/. client/dist/wf-gestor/
 
       - uses: actions/upload-pages-artifact@v3
         with:

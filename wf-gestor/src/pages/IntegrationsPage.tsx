@@ -1,0 +1,263 @@
+import { useState } from 'react'
+import { CheckCircle2, CircleHelp, Link, RefreshCw, ShieldCheck } from 'lucide-react'
+import { accounts, num, type Channel } from '../data'
+import {
+  getAmazonConnector,
+  idleStates,
+  readLastSync,
+  runAmazonSync,
+  syncResources,
+  type SyncOutcome,
+  type SyncState,
+} from '../integrations'
+import { PageHeader, Panel, StatTile, Tag } from '../components/ui'
+
+const methods: Record<Channel, string[]> = {
+  Amazon: ['Autorização via Selling Partner', 'Sandbox antes de produção', 'Escopos por recurso'],
+  'Mercado Livre': ['OAuth do vendedor', 'App oficial registrado', 'Renovação automática do token'],
+  Shopee: ['OAuth da loja', 'Assinatura de requisições', 'Ambiente de teste'],
+  'TikTok Shop': ['OAuth da loja', 'Escopos de pedidos e catálogo', 'Retentativa com backoff'],
+}
+
+const capabilities: Record<Channel, string[]> = {
+  Amazon: ['Pedidos e extrato', 'FBA e DBA', 'Anúncios', 'Precificação'],
+  'Mercado Livre': ['Pedidos e repasses', 'Anúncios', 'Estoque', 'Custos'],
+  Shopee: ['Pedidos e repasses', 'Estoque', 'Custos'],
+  'TikTok Shop': ['Pedidos', 'Estoque', 'Custos'],
+}
+
+export default function IntegrationsPage() {
+  const [state, setState] = useState(accounts)
+  const [notice, setNotice] = useState('')
+  const [amazonStates, setAmazonStates] = useState<SyncState[]>(idleStates)
+  const [running, setRunning] = useState(false)
+  const [outcome, setOutcome] = useState<SyncOutcome | null>(null)
+  const [lastSync, setLastSync] = useState<string | null>(() => readLastSync())
+  const mode = getAmazonConnector().mode
+
+  const run = async () => {
+    if (running) return
+    setRunning(true)
+    setOutcome(null)
+    const result = await runAmazonSync(setAmazonStates)
+    setOutcome(result)
+    setLastSync(readLastSync())
+    setRunning(false)
+    if (result.ok) {
+      setState((current) =>
+        current.map((account) => (account.channel === 'Amazon' ? { ...account, lastSync: 'agora mesmo' } : account)),
+      )
+    }
+  }
+
+  const connect = (channel: Channel) => {
+    setState((current) =>
+      current.map((account) =>
+        account.channel === channel
+          ? { ...account, status: 'Conectado', lastSync: 'agora mesmo' }
+          : account,
+      ),
+    )
+    setNotice(`Conexão com ${channel} confirmada. A primeira sincronização foi iniciada.`)
+    if (channel === 'Amazon') void run()
+  }
+
+  const sync = () => {
+    if (mode === 'producao') {
+      void run()
+      return
+    }
+    setState((current) => current.map((account) => ({ ...account, lastSync: 'agora mesmo' })))
+    setNotice('Sincronização executada em todos os canais conectados.')
+    void run()
+  }
+
+  const syncChannel = (channel: Channel) => {
+    if (channel === 'Amazon') {
+      void run()
+      return
+    }
+    setState((current) =>
+      current.map((account) => (account.channel === channel ? { ...account, lastSync: 'agora mesmo' } : account)),
+    )
+    setNotice(`Sincronização de ${channel} executada.`)
+  }
+
+  const connected = state.filter((account) => account.status === 'Conectado').length
+  const orders = state.reduce((sum, account) => sum + account.orders, 0)
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Integrações"
+        title="Contas de marketplace"
+        description="Vincule cada loja por autorização oficial, com escopos separados, token protegido e status de sincronização visível."
+        action={
+          <button className="primary" onClick={sync}>
+            <RefreshCw size={17} /> Sincronizar tudo
+          </button>
+        }
+      />
+
+      <section className="metrics">
+        <StatTile label="Canais conectados" value={`${connected}/${state.length}`} hint="contas autorizadas" tone="positive" />
+        <StatTile label="Pedidos sincronizados" value={num(orders)} hint="acumulado das contas" />
+        <StatTile label="Aguardando autorização" value={num(state.filter((a) => a.status === 'Pendente').length)} hint="conclua o OAuth" tone="attention" />
+        <StatTile label="Próxima varredura" value="em 6 min" hint="agendamento automático" />
+      </section>
+
+      <Panel
+        title="Sincronização Amazon"
+        hint={mode === 'simulado' ? 'Modo simulado' : 'Produção · SP-API'}
+        className="sync-run"
+        action={
+          <div className="sync-run-actions">
+            <Tag value={mode === 'simulado' ? 'Simulado' : 'Produção'} />
+            <button className="primary" onClick={() => void run()} disabled={running}>
+              <RefreshCw size={16} className={running ? 'spin' : ''} />
+              {running ? 'Sincronizando…' : 'Executar sincronização'}
+            </button>
+          </div>
+        }
+      >
+        <ul className="sync-run-list">
+          {amazonStates.map((item) => {
+            const meta = syncResources.find((resource) => resource.key === item.resource)!
+            return (
+              <li key={item.resource} className={`is-${item.status.replace(/\s+/g, '-')}`}>
+                <span className="sync-mark">
+                  {item.status === 'ok' ? (
+                    <CheckCircle2 size={15} />
+                  ) : item.status === 'erro' ? (
+                    <CircleHelp size={15} />
+                  ) : (
+                    <RefreshCw size={15} className={item.status === 'em curso' ? 'spin' : ''} />
+                  )}
+                </span>
+                <b>{meta.label}</b>
+                <span className="scope">{meta.scope}</span>
+                <span className="result">
+                  {item.status === 'ok'
+                    ? `${num(item.count)} registros`
+                    : item.detail ?? (item.status === 'aguardando' ? 'aguardando' : '')}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+
+        <div className="sync-run-foot">
+          <span className="sync-mode">
+            {mode === 'simulado'
+              ? 'Sem credenciais no navegador: os dados são gerados localmente até o proxy SP-API estar no ar.'
+              : 'Credenciais LWA mantidas no servidor proxy; o navegador só recebe o resultado.'}
+          </span>
+          <span className="last-sync">Última execução: {lastSync ?? 'nunca'}</span>
+        </div>
+
+        {outcome && (
+          <div className={`sync-outcome ${outcome.ok ? 'is-ok' : 'is-error'}`} role="status">
+            <b>{outcome.message}</b>
+            {outcome.hint && <p>{outcome.hint}</p>}
+          </div>
+        )}
+      </Panel>
+
+      <div className="integration-grid">
+        {state.map((account) => (
+          <article className="panel integration-card" key={account.channel}>
+            <header>
+              <span className={`channel-badge badge-${account.channel.toLowerCase().replace(' ', '-')}`}>{account.channel.slice(0, 2).toUpperCase()}</span>
+              <div>
+                <h2>{account.channel}</h2>
+                <small>{account.store}</small>
+              </div>
+              <Tag value={account.status} />
+            </header>
+
+            <dl className="integration-meta">
+              <div>
+                <dt>Conectado desde</dt>
+                <dd>{account.since}</dd>
+              </div>
+              <div>
+                <dt>Última sincronização</dt>
+                <dd>{account.lastSync}</dd>
+              </div>
+              <div>
+                <dt>Pedidos</dt>
+                <dd>{num(account.orders)}</dd>
+              </div>
+            </dl>
+
+            <div className="capability-list">
+              {capabilities[account.channel].map((item) => (
+                <span key={item}>
+                  <CheckCircle2 size={13} /> {item}
+                </span>
+              ))}
+            </div>
+
+            <div className="method">
+              <ShieldCheck size={14} />
+              <span>{methods[account.channel].join(' · ')}</span>
+            </div>
+
+            {account.status === 'Conectado' ? (
+              <button className="ghost lg full" onClick={() => syncChannel(account.channel)}>
+                <RefreshCw size={15} /> Sincronizar canal
+              </button>
+            ) : (
+              <button className="primary full" onClick={() => connect(account.channel)}>
+                <Link size={16} /> Autorizar conta
+              </button>
+            )}
+          </article>
+        ))}
+      </div>
+
+      <div className="two-col">
+        <Panel title="Escopo de dados por canal" hint="Menor privilégio por integração">
+          <div className="scope-list">
+            {state.map((account) => (
+              <div key={account.channel}>
+                <b>{account.channel}</b>
+                <p>{methods[account.channel].join(' · ')}</p>
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel title="Saúde das sincronizações" hint="Atraso e falhas ficam visíveis">
+          <ul className="sync-health">
+            <li>
+              <span className="dot on" /> Amazon · pedidos e finanças há 8 min
+            </li>
+            <li>
+              <span className="dot on" /> Mercado Livre · pedidos há 14 min
+            </li>
+            <li>
+              <span className="dot on" /> Shopee · pedidos há 21 min
+            </li>
+            <li>
+              <span className="dot" /> TikTok Shop · aguardando autorização
+            </li>
+          </ul>
+          <p className="hint-text">
+            Nenhum total é apresentado como “tempo real” sem a data de atualização ao lado. Falhas de sincronização aparecem com
+            motivo e nova tentativa.
+          </p>
+        </Panel>
+      </div>
+
+      {notice && (
+        <div className="toast" role="status">
+          {notice}
+          <button className="toast-close" onClick={() => setNotice('')}>
+            Fechar
+          </button>
+        </div>
+      )}
+    </>
+  )
+}
