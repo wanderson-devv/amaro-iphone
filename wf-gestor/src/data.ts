@@ -39,6 +39,7 @@ export type Sale = {
   status: SaleStatus
   settlement: 'Conciliado' | 'Pendente' | 'Divergente'
   partial?: boolean
+  costUnknown?: boolean
 }
 
 type SaleSeed = {

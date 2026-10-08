@@ -1,7 +1,15 @@
 import { useMemo, useState } from 'react'
 import { Download, Filter, Search, X } from 'lucide-react'
-import { brl, num, pct, sales as demoSales, type Sale } from '../data'
-import { ALL_ORDERS_SINCE, useAmazonSales } from '../integrations'
+import { brl, num, pct, sales as demoSales } from '../data'
+import {
+  ALL_ORDERS_SINCE,
+  FINANCE_SINCE,
+  allocateAds,
+  enrichSales,
+  useAmazonFinance,
+  useAmazonSales,
+  useAmazonSkus,
+} from '../integrations'
 import { PageHeader, Panel, StatTile, Tag } from '../components/ui'
 
 const channels = ['Todos', 'Amazon', 'Mercado Livre', 'Shopee', 'TikTok Shop']
@@ -11,35 +19,50 @@ export default function SalesPage() {
   const [channel, setChannel] = useState('Todos')
   const [status, setStatus] = useState('Todos')
   const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState<Sale | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const amazon = useAmazonSales(ALL_ORDERS_SINCE)
+  const finance = useAmazonFinance(FINANCE_SINCE)
+  const skuMeta = useAmazonSkus()
   const usingReal = amazon.status === 'live' || (amazon.status !== 'inicial' && amazon.sales.length > 0)
-  const source = usingReal ? amazon.sales : demoSales
-  const hasFinancials = source.some((sale) => !sale.partial)
+  const source = usingReal ? enrichSales(amazon.sales, finance.orders, skuMeta.skus) : demoSales
+  const adsTotal = usingReal ? finance.ads.reduce((sum, item) => sum + item.amount, 0) : 0
+  const enriched = usingReal ? allocateAds(source, adsTotal) : source
 
   const filtered = useMemo(
     () =>
-      source.filter((sale) => {
+      enriched.filter((sale) => {
         const matchesChannel = channel === 'Todos' || sale.channel === channel
         const matchesStatus = status === 'Todos' || sale.status === status
         const haystack = `${sale.id} ${sale.product} ${sale.sku} ${sale.externalSku}`.toLowerCase()
         return matchesChannel && matchesStatus && haystack.includes(query.toLowerCase())
       }),
-    [source, channel, status, query],
+    [enriched, channel, status, query],
   )
 
-  const totals = filtered.reduce(
+  const rows = filtered
+  const selected = selectedId ? (rows.find((sale) => sale.id === selectedId) ?? null) : null
+
+  const knownRows = rows.filter((sale) => sale.partial === false)
+  const hasNet = usingReal ? knownRows.length > 0 : true
+  const hasCost = usingReal ? knownRows.length > 0 && knownRows.every((sale) => !sale.costUnknown) : true
+  const hasProfit = hasNet && hasCost
+
+  const totals = rows.reduce(
     (acc, sale) => ({
       gross: acc.gross + sale.gross,
-      net: acc.net + sale.net,
-      profit: acc.profit + sale.profit,
+      net: acc.net + (sale.partial === false ? sale.net : 0),
+      profit: acc.profit + (sale.partial === false ? sale.costUnknown ? 0 : sale.profit : 0),
       qty: acc.qty + sale.qty,
     }),
     { gross: 0, net: 0, profit: 0, qty: 0 },
   )
 
   const margin = totals.gross > 0 ? (totals.profit / totals.gross) * 100 : 0
+  const costLabel = 'informe o custo dos SKUs em Catálogo'
+  const feeLabel = 'aguardando o extrato financeiro'
+  const coverage = rows.length ? knownRows.length / rows.length : 1
+  const netHint = coverage >= 1 ? 'após taxas e impostos' : `extrato de ${knownRows.length} de ${rows.length} pedidos`
 
   return (
     <>
@@ -59,13 +82,13 @@ export default function SalesPage() {
         <StatTile label="Faturamento" value={brl(totals.gross)} hint="bruto no recorte" />
         <StatTile
           label="Líquido do marketplace"
-          value={hasFinancials ? brl(totals.net) : '—'}
-          hint={hasFinancials ? 'após taxas e impostos' : 'aguardando a liberação de Fees'}
+          value={hasNet ? brl(totals.net) : '—'}
+          hint={hasNet ? netHint : feeLabel}
         />
         <StatTile
           label="Lucro"
-          value={hasFinancials ? brl(totals.profit) : '—'}
-          hint={hasFinancials ? `margem de ${pct(margin)}` : 'aguardando a liberação de Fees'}
+          value={hasProfit ? brl(totals.profit) : '—'}
+          hint={hasProfit ? `margem de ${pct(margin)}` : hasNet ? costLabel : feeLabel}
           tone="positive"
         />
       </section>
@@ -80,6 +103,12 @@ export default function SalesPage() {
         <div className="data-mode is-demo">
           <b>Última leitura disponível.</b> {amazon.message}
           {amazon.hint ? ` · ${amazon.hint}` : ''}
+        </div>
+      )}
+      {usingReal && finance.status !== 'live' && (
+        <div className="data-mode is-demo">
+          <b>Extrato financeiro indisponível.</b> {finance.message}
+          {finance.hint ? ` · ${finance.hint}` : ''}
         </div>
       )}
 
@@ -134,8 +163,8 @@ export default function SalesPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((sale) => (
-                <tr key={sale.id} onClick={() => setSelected(sale)} className="clickable">
+              {rows.map((sale) => (
+                <tr key={sale.id} onClick={() => setSelectedId(sale.id)} className="clickable">
                   <td className="order">{sale.id}</td>
                   <td className="mono">{new Date(`${sale.date}T12:00:00`).toLocaleDateString('pt-BR')}</td>
                   <td>
@@ -148,18 +177,18 @@ export default function SalesPage() {
                   <td>{sale.qty}</td>
                   <td>{brl(sale.gross)}</td>
                   <td className="muted">{sale.partial ? '—' : brl(sale.commission + sale.fees)}</td>
-                  <td className="muted">{sale.partial ? '—' : brl(sale.cost)}</td>
+                  <td className="muted">{sale.costUnknown ? '—' : brl(sale.cost)}</td>
                   <td className="muted">{sale.partial ? '—' : brl(sale.taxes)}</td>
-                  <td className={sale.partial ? 'muted' : sale.profit >= 0 ? 'profit' : 'loss'}>
-                    {sale.partial ? '—' : brl(sale.profit)}
+                  <td className={sale.partial || sale.costUnknown ? 'muted' : sale.profit >= 0 ? 'profit' : 'loss'}>
+                    {sale.partial || sale.costUnknown ? '—' : brl(sale.profit)}
                   </td>
-                  <td>{sale.partial ? '—' : pct(sale.margin)}</td>
+                  <td>{sale.partial || sale.costUnknown ? '—' : pct(sale.margin)}</td>
                   <td>
                     <Tag value={sale.status} />
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && (
+              {rows.length === 0 && (
                 <tr>
                   <td colSpan={12} className="empty">
                     Nenhum pedido corresponde aos filtros selecionados.
@@ -172,14 +201,14 @@ export default function SalesPage() {
       </Panel>
 
       {selected && (
-        <div className="drawer-backdrop" onClick={() => setSelected(null)}>
+        <div className="drawer-backdrop" onClick={() => setSelectedId(null)}>
           <aside className="drawer" onClick={(event) => event.stopPropagation()}>
             <header>
               <div>
                 <span className="eyebrow">Extrato do pedido</span>
                 <h2>{selected.id}</h2>
               </div>
-              <button className="icon-button" onClick={() => setSelected(null)} aria-label="Fechar">
+              <button className="icon-button" onClick={() => setSelectedId(null)} aria-label="Fechar">
                 <X size={17} />
               </button>
             </header>
@@ -216,7 +245,7 @@ export default function SalesPage() {
                 ['(−) Taxas de serviço', selected.partial ? '—' : `− ${brl(selected.fees)}`],
                 ['(−) Impostos', selected.partial ? '—' : `− ${brl(selected.taxes)}`],
                 ['Líquido recebido', selected.partial ? '—' : brl(selected.net)],
-                ['(−) Custo do produto', selected.partial ? '—' : `− ${brl(selected.cost)}`],
+                ['(−) Custo do produto', selected.costUnknown ? '—' : `− ${brl(selected.cost)}`],
                 ['(−) Investimento em Ads', selected.partial ? '—' : `− ${brl(selected.ads)}`],
               ].map(([label, value]) => (
                 <div key={label} className={label.startsWith('(') ? 'deduction' : ''}>
@@ -224,17 +253,23 @@ export default function SalesPage() {
                   <b>{value}</b>
                 </div>
               ))}
-              <div className={`total ${!selected.partial && selected.profit < 0 ? 'is-loss' : ''}`}>
+              <div className={`total ${!selected.partial && !selected.costUnknown && selected.profit < 0 ? 'is-loss' : ''}`}>
                 <span>Lucro da venda</span>
-                <b>{selected.partial ? '—' : brl(selected.profit)}</b>
+                <b>{selected.partial || selected.costUnknown ? '—' : brl(selected.profit)}</b>
               </div>
               <div className="total">
                 <span>Margem líquida</span>
-                <b>{selected.partial ? '—' : pct(selected.margin)}</b>
+                <b>{selected.partial || selected.costUnknown ? '—' : pct(selected.margin)}</b>
               </div>
               {selected.partial && (
                 <p className="breakdown-note">
-                  Comissões, impostos e repasses aparecem aqui quando a Amazon liberar a API de Fees para o app.
+                  O extrato deste pedido ainda não foi publicado pela Amazon — comissões, taxas e impostos aparecem
+                  aqui assim que saírem.
+                </p>
+              )}
+              {!selected.partial && selected.costUnknown && (
+                <p className="breakdown-note">
+                  Informe o custo de {selected.sku} na aba Catálogo para calcular lucro e margem deste pedido.
                 </p>
               )}
             </div>

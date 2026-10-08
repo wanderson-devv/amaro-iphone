@@ -12,7 +12,16 @@ import {
 } from 'lucide-react'
 import { brl, brlShort, dateBR, num, pct, priorities, sales as demoSales, type Sale, type SaleStatus } from '../data'
 import { PageHeader, Panel, StatTile } from '../components/ui'
-import { useAmazonSales, useAutoSyncStatus, ALL_ORDERS_SINCE, type LiveFeed } from '../integrations'
+import {
+  ALL_ORDERS_SINCE,
+  allocateAds,
+  enrichSales,
+  useAmazonFinance,
+  useAmazonSales,
+  useAmazonSkus,
+  useAutoSyncStatus,
+  type LiveFeed,
+} from '../integrations'
 
 const DEMO_HOJE = '2026-05-30'
 const HOJE = new Date().toISOString().slice(0, 10)
@@ -86,6 +95,7 @@ export default function DashboardPage({
 }) {
   const syncStatus = useAutoSyncStatus()
   const amazon = useAmazonSales(ALL_ORDERS_SINCE)
+  const skuMeta = useAmazonSkus()
   const usingReal = amazon.status === 'live' || (amazon.status !== 'inicial' && amazon.sales.length > 0)
   const base = usingReal ? HOJE : DEMO_HOJE
   const periodPresets = useMemo(() => buildPresets(base), [base])
@@ -121,6 +131,7 @@ export default function DashboardPage({
 
   const periodo: Range = custom ?? periodPresets.find((item) => item.label === presetLabel)!.range
   const triggerLabel = custom ? `${fullBR(custom.start)} — ${fullBR(custom.end)}` : presetLabel
+  const finance = useAmazonFinance(usingReal ? periodo.start : shiftDay(HOJE, -29))
 
   const applyPreset = (label: string) => {
     const found = periodPresets.find((item) => item.label === label)!
@@ -138,8 +149,7 @@ export default function DashboardPage({
     setOpen(false)
   }
 
-  const source = usingReal ? amazon.sales : demoSales
-  const hasFinancials = source.some((sale) => !sale.partial)
+  const source = usingReal ? enrichSales(amazon.sales, finance.orders, skuMeta.skus) : demoSales
 
   const filtered = useMemo(() => {
     return source.filter((sale) => {
@@ -150,20 +160,35 @@ export default function DashboardPage({
     })
   }, [source, periodo, canal, situacao])
 
+  const adsInPeriod = usingReal
+    ? finance.ads
+        .filter((item) => item.date >= periodo.start && item.date <= periodo.end)
+        .reduce((sum, item) => sum + item.amount, 0)
+    : 0
+
+  const rows = usingReal ? allocateAds(filtered, adsInPeriod) : filtered
+
+  const knownRows = rows.filter((sale) => sale.partial === false)
+  const hasNet = usingReal ? knownRows.length > 0 : true
+  const hasCost = usingReal ? knownRows.length > 0 && knownRows.every((sale) => !sale.costUnknown) : true
+  const hasAds = usingReal ? finance.status === 'live' && adsInPeriod > 0 : true
+  const hasProfit = hasNet && hasCost
+  const coverage = rows.length ? knownRows.length / rows.length : 1
+  const adsTotal = usingReal ? adsInPeriod : filtered.reduce((sum, sale) => sum + sale.ads, 0)
+
   const kpi = useMemo(() => {
-    const acc = filtered.reduce(
+    const acc = rows.reduce(
       (sum, sale) => ({
         gross: sum.gross + sale.gross,
-        net: sum.net + sale.net,
-        cost: sum.cost + sale.cost,
-        ads: sum.ads + sale.ads,
+        net: sum.net + (sale.partial === false ? sale.net : 0),
+        cost: sum.cost + (sale.partial === false ? sale.cost : 0),
         units: sum.units + sale.qty,
         orders: sum.orders + 1,
       }),
-      { gross: 0, net: 0, cost: 0, ads: 0, units: 0, orders: 0 },
+      { gross: 0, net: 0, cost: 0, units: 0, orders: 0 },
     )
     const lucroBruto = acc.net - acc.cost
-    const lucroPosAds = lucroBruto - acc.ads
+    const lucroPosAds = lucroBruto - adsTotal
     const ratio = (value: number) => (acc.gross > 0 ? (value / acc.gross) * 100 : 0)
     return {
       faturamento: acc.gross,
@@ -173,17 +198,17 @@ export default function DashboardPage({
       vendas: acc.orders,
       unidades: acc.units,
       ticket: acc.orders > 0 ? acc.gross / acc.orders : 0,
-      roi: acc.ads > 0 ? (lucroPosAds / acc.ads) * 100 : 0,
-      ads: acc.ads,
-      tacos: ratio(acc.ads),
+      roi: adsTotal > 0 ? (lucroPosAds / adsTotal) * 100 : 0,
+      ads: adsTotal,
+      tacos: ratio(adsTotal),
       lucroPosAds,
       mpa: ratio(lucroPosAds),
     }
-  }, [filtered])
+  }, [rows, adsTotal])
 
   const daily = useMemo(() => {
     const acc = new Map<string, { revenue: number; net: number; profit: number }>()
-    filtered.forEach((sale) => {
+    rows.forEach((sale) => {
       const current = acc.get(sale.date) ?? { revenue: 0, net: 0, profit: 0 }
       current.revenue += sale.gross
       current.net += sale.net
@@ -191,19 +216,19 @@ export default function DashboardPage({
       acc.set(sale.date, current)
     })
     return [...acc.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, value]) => ({ date, ...value }))
-  }, [filtered])
+  }, [rows])
 
-  const dates = filtered.map((sale) => sale.date).sort()
+  const dates = rows.map((sale) => sale.date).sort()
   const range = dates.length
     ? `${fullBR(dates[0])} a ${fullBR(dates[dates.length - 1])}`
     : 'sem movimento no período'
 
   const channelMix = useMemo(() => {
     const acc = new Map<string, { revenue: number; profit: number }>()
-    filtered.forEach((sale) => {
+    rows.forEach((sale) => {
       const current = acc.get(sale.channel) ?? { revenue: 0, profit: 0 }
       current.revenue += sale.gross
-      current.profit += sale.profit
+      current.profit += hasProfit ? sale.profit : 0
       acc.set(sale.channel, current)
     })
     const total = [...acc.values()].reduce((sum, item) => sum + item.revenue, 0)
@@ -215,15 +240,15 @@ export default function DashboardPage({
         share: total > 0 ? Math.round((value.revenue / total) * 100) : 0,
       }))
       .sort((a, b) => b.revenue - a.revenue)
-  }, [filtered])
+  }, [rows, hasProfit])
 
   const peak = daily.reduce<{ date: string; revenue: number } | null>(
     (best, item) => (best && best.revenue >= item.revenue ? best : { date: item.date, revenue: item.revenue }),
     null,
   )
-  const weakest = hasFinancials
-    ? filtered
-        .filter((sale) => sale.gross > 0)
+  const weakest = hasProfit
+    ? rows
+        .filter((sale) => sale.gross > 0 && sale.partial === false)
         .reduce<Sale | null>((worst, sale) => (worst && worst.margin <= sale.margin ? worst : sale), null)
     : null
 
@@ -236,12 +261,12 @@ export default function DashboardPage({
       y: height - (item[key] / maxRevenue) * (height - 18),
     }))
 
-  const visibleSales = filtered
+  const visibleSales = rows
     .filter((sale) => `${sale.id} ${sale.product} ${sale.channel}`.toLowerCase().includes(query.toLowerCase()))
     .slice(0, 6)
 
   const livePendingIds = new Set((live?.pending ?? []).map((sale) => sale.id))
-  const filteredIds = new Set(filtered.map((sale) => sale.id))
+  const filteredIds = new Set(rows.map((sale) => sale.id))
   const liveRows = (live?.sales ?? [])
     .filter((sale) => {
       const day = sale.purchasedAt.slice(0, 10)
@@ -251,22 +276,31 @@ export default function DashboardPage({
     })
     .slice(0, 3)
 
-  const pendingFees = 'aguardando a liberação de Fees'
-  const pendingAds = 'aguardando a API de Ads'
+  const pendingFees = finance.status === 'live' ? 'sem extrato neste recorte' : 'aguardando o extrato financeiro'
+  const pendingCost = 'informe o custo dos SKUs em Catálogo'
+  const pendingAds =
+    finance.status !== 'live'
+      ? 'aguardando a API de Ads'
+      : finance.source === 'por pedido'
+        ? 'cobranças de Ads indisponíveis agora'
+        : 'sem cobrança de Ads no período'
+  const netHint = coverage >= 1 ? 'após comissões e impostos' : `extrato de ${knownRows.length} de ${rows.length} pedidos`
+  const adsHint = !hasAds ? pendingAds : !hasNet ? pendingFees : !hasCost ? pendingCost : 'sem dados no recorte'
+  const adsGate = hasAds && hasProfit
 
   const kpis: { label: string; value: string; hint: string; tone?: 'positive' | 'attention'; info?: string }[] = [
     { label: 'Faturamento', value: brl(kpi.faturamento), hint: 'vendas brutas aprovadas', info: 'Soma dos valores de venda antes de taxas, impostos e custos.' },
-    { label: 'Líq. do Marketplace', value: hasFinancials ? brl(kpi.liquido) : '—', hint: hasFinancials ? 'após comissões e impostos' : pendingFees, info: 'Valor que o marketplace repassa depois das taxas e impostos.' },
-    { label: 'Lucro Bruto', value: hasFinancials ? brl(kpi.lucroBruto) : '—', hint: hasFinancials ? 'líquido menos custo do produto' : pendingFees, tone: hasFinancials ? 'positive' : undefined, info: 'Líquido do marketplace subtraído do custo dos produtos vendidos.' },
-    { label: 'Margem', value: hasFinancials ? pct(kpi.margem) : '—', hint: hasFinancials ? 'sobre o faturamento bruto' : pendingFees, info: 'Lucro bruto dividido pelo faturamento bruto.' },
+    { label: 'Líq. do Marketplace', value: hasNet ? brl(kpi.liquido) : '—', hint: hasNet ? netHint : pendingFees, info: 'Valor que o marketplace repassa depois das taxas e impostos.' },
+    { label: 'Lucro Bruto', value: hasProfit ? brl(kpi.lucroBruto) : '—', hint: hasProfit ? 'líquido menos custo do produto' : hasNet ? pendingCost : pendingFees, tone: hasProfit ? 'positive' : undefined, info: 'Líquido do marketplace subtraído do custo dos produtos vendidos.' },
+    { label: 'Margem', value: hasProfit ? pct(kpi.margem) : '—', hint: hasProfit ? 'sobre o faturamento bruto' : hasNet ? pendingCost : pendingFees, info: 'Lucro bruto dividido pelo faturamento bruto.' },
     { label: 'Número de Vendas', value: num(kpi.vendas), hint: 'pedidos no recorte', info: 'Quantidade de pedidos aprovados no período filtrado.' },
     { label: 'Número de Unidades Vendidas', value: num(kpi.unidades), hint: 'itens despachados', info: 'Soma das quantidades de todos os itens vendidos.' },
     { label: 'Ticket Médio', value: brl(kpi.ticket), hint: 'faturamento por pedido', info: 'Faturamento bruto dividido pelo número de vendas.' },
-    { label: 'Retorno Sobre Investimento', value: hasFinancials ? pct(kpi.roi) : '—', hint: hasFinancials ? 'lucro em relacao ao Ads' : pendingAds, tone: hasFinancials ? (kpi.roi >= 100 ? 'positive' : 'attention') : undefined, info: 'Lucro pós-Ads dividido pelo investimento em Ads.' },
-    { label: 'Valor em Ads', value: hasFinancials ? brl(kpi.ads) : '—', hint: hasFinancials ? 'investimento em anúncios' : pendingAds, info: 'Soma do gasto com campanhas pagas no período.' },
-    { label: 'TACOS', value: hasFinancials ? pct(kpi.tacos) : '—', hint: hasFinancials ? 'Ads sobre faturamento' : pendingAds, tone: hasFinancials ? (kpi.tacos <= 10 ? 'positive' : 'attention') : undefined, info: 'Total de Ads dividido pelo faturamento bruto.' },
-    { label: 'Lucro bruto pós ADS', value: hasFinancials ? brl(kpi.lucroPosAds) : '—', hint: hasFinancials ? 'descontado o investimento' : pendingAds, tone: hasFinancials ? 'positive' : undefined, info: 'Lucro bruto depois de subtrair o investimento em Ads.' },
-    { label: 'MPA', value: hasFinancials ? pct(kpi.mpa) : '—', hint: hasFinancials ? 'margem depois do Ads' : pendingAds, tone: hasFinancials ? 'positive' : undefined, info: 'Margem pós-Ads: lucro pós-Ads sobre o faturamento bruto.' },
+    { label: 'Retorno Sobre Investimento', value: adsGate ? pct(kpi.roi) : '—', hint: adsGate ? 'lucro em relacao ao Ads' : adsHint, tone: adsGate ? (kpi.roi >= 100 ? 'positive' : 'attention') : undefined, info: 'Lucro pós-Ads dividido pelo investimento em Ads.' },
+    { label: 'Valor em Ads', value: hasAds ? brl(kpi.ads) : '—', hint: hasAds ? 'investimento em anúncios' : pendingAds, info: 'Soma do gasto com campanhas pagas no período.' },
+    { label: 'TACOS', value: hasAds ? pct(kpi.tacos) : '—', hint: hasAds ? 'Ads sobre faturamento' : pendingAds, tone: hasAds ? (kpi.tacos <= 10 ? 'positive' : 'attention') : undefined, info: 'Total de Ads dividido pelo faturamento bruto.' },
+    { label: 'Lucro bruto pós ADS', value: adsGate ? brl(kpi.lucroPosAds) : '—', hint: adsGate ? 'descontado o investimento' : adsHint, tone: adsGate ? 'positive' : undefined, info: 'Lucro bruto depois de subtrair o investimento em Ads.' },
+    { label: 'MPA', value: adsGate ? pct(kpi.mpa) : '—', hint: adsGate ? 'margem depois do Ads' : adsHint, tone: adsGate ? 'positive' : undefined, info: 'Margem pós-Ads: lucro pós-Ads sobre o faturamento bruto.' },
   ]
 
   return (
@@ -292,7 +326,9 @@ export default function DashboardPage({
         {amazon.status === 'inicial' && <>Lendo pedidos reais da Amazon…</>}
         {amazon.status === 'live' && (
           <>
-            <b>Dados reais da Amazon.</b> {amazon.message} · atualizado às{' '}
+            <b>Dados reais da Amazon.</b> {amazon.message} · extrato{' '}
+            {finance.status === 'live' ? finance.message : `${finance.message}${finance.hint ? ` · ${finance.hint}` : ''}`} ·
+            atualizado às{' '}
             {new Date(amazon.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
           </>
         )}
@@ -416,10 +452,10 @@ export default function DashboardPage({
           </div>
           <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-label="Resumo diário de receitas, líquido e lucro">
             <path className="area area-revenue" d={areaPath(toPoints('revenue'), height)} />
-            {hasFinancials && <path className="area area-net" d={areaPath(toPoints('net'), height)} />}
-            {hasFinancials && <path className="area area-profit" d={areaPath(toPoints('profit'), height)} />}
+            {hasNet && <path className="area area-net" d={areaPath(toPoints('net'), height)} />}
+            {hasProfit && <path className="area area-profit" d={areaPath(toPoints('profit'), height)} />}
             <path className="revenue-line" d={linePath(toPoints('revenue'))} />
-            {hasFinancials && <path className="profit-line" d={linePath(toPoints('profit'))} />}
+            {hasProfit && <path className="profit-line" d={linePath(toPoints('profit'))} />}
           </svg>
           <div className="chart-labels">
             {daily.map((item) => (
@@ -431,12 +467,12 @@ export default function DashboardPage({
           <span>
             <i className="revenue-dot" /> Faturamento
           </span>
-          {hasFinancials && (
+          {hasNet && (
             <span>
               <i className="net-dot" /> Líquido do marketplace
             </span>
           )}
-          {hasFinancials && (
+          {hasProfit && (
             <span>
               <i className="profit-dot" /> Lucro
             </span>
@@ -493,7 +529,7 @@ export default function DashboardPage({
             <span>
               <i className="profit-dot" /> Lucro
             </span>
-            <span className="synced">{num(filtered.length)} pedidos no recorte</span>
+            <span className="synced">{num(rows.length)} pedidos no recorte</span>
           </div>
         </Panel>
       </section>
@@ -560,8 +596,10 @@ export default function DashboardPage({
                     <span className="channel">{sale.channel}</span>
                   </td>
                   <td>{brl(sale.gross)}</td>
-                  <td className="profit">{sale.partial ? '—' : brl(sale.profit)}</td>
-                  <td>{sale.partial ? '—' : pct(sale.margin)}</td>
+                  <td className={sale.partial || sale.costUnknown ? 'muted' : sale.profit >= 0 ? 'profit' : 'loss'}>
+                    {sale.partial || sale.costUnknown ? '—' : brl(sale.profit)}
+                  </td>
+                  <td>{sale.partial || sale.costUnknown ? '—' : pct(sale.margin)}</td>
                   <td>
                     <span className={`tag ${sale.status === 'Recebido' ? 'tag-ok' : 'tag-info'}`}>{sale.status}</span>
                   </td>
@@ -585,8 +623,8 @@ export default function DashboardPage({
           <b>Como ler este painel</b>
           <p>
             Os 12 indicadores são recalculados a cada filtro e vêm dos pedidos reais da Amazon quando o proxy está no ar.
-            Indicadores marcados com “—” aguardam a liberação das APIs de Fees e Ads pela Amazon — clique em qualquer
-            linha para abrir o pedido na página de vendas.
+            Indicadores marcados com “—” aguardam o extrato financeiro da Amazon, o custo dos SKUs (aba Catálogo) ou a
+            API de Ads — clique em qualquer linha para abrir o pedido na página de vendas.
           </p>
         </div>
         <button className="ghost" onClick={() => onNavigate('Análises')}>
@@ -601,11 +639,13 @@ export default function DashboardPage({
         </span>
         <span>
           <ArrowDownRight size={14} />{' '}
-          {hasFinancials
+          {hasProfit
             ? weakest
               ? `Menor margem em ${weakest.product}`
               : 'Sem margem calculada no recorte'
-            : 'Lucro e margem aguardam a liberação de Fees'}
+            : hasNet
+              ? 'Cadastre o custo dos SKUs em Catálogo para ver a margem'
+              : 'Lucro e margem aguardam o extrato financeiro'}
         </span>
       </section>
     </>

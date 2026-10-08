@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { CheckCheck, Link2, Plus, Upload, AlertTriangle } from 'lucide-react'
 import { brl, num, pct, products, sales, type Channel } from '../data'
+import { FINANCE_SINCE, useAmazonFinance, useAmazonSkus } from '../integrations'
 import { PageHeader, Panel, StatTile, Tag } from '../components/ui'
 
 const allChannels: Channel[] = ['Amazon', 'Mercado Livre', 'Shopee', 'TikTok Shop']
@@ -12,8 +13,11 @@ const unmatched = sales
 export default function CatalogPage() {
   const [linked, setLinked] = useState<Record<string, boolean>>({})
   const [notice, setNotice] = useState('')
+  const finance = useAmazonFinance(FINANCE_SINCE)
+  const { skus: skuMeta, save } = useAmazonSkus()
 
   const withoutChannel = products.filter((product) => product.channels.length < allChannels.length).length
+  const amazonSkus = finance.skus
 
   const associate = (sku: string) => {
     setLinked((current) => ({ ...current, [sku]: true }))
@@ -156,6 +160,77 @@ export default function CatalogPage() {
           </Panel>
         </div>
       </div>
+
+      <Panel
+        title="SKUs da Amazon"
+        hint={finance.status === 'live' ? 'Vindos do extrato financeiro real' : 'Extrato financeiro'}
+        className="sales-panel"
+      >
+        {finance.status === 'inicial' && <p className="breakdown-note">Lendo o extrato financeiro da Amazon…</p>}
+        {finance.status !== 'inicial' && amazonSkus.length === 0 && (
+          <p className="breakdown-note">
+            {finance.message}
+            {finance.hint ? ` · ${finance.hint}` : ''}
+          </p>
+        )}
+        {amazonSkus.length > 0 && (
+          <div className="table-scroll">
+            <table className="wide">
+              <thead>
+                <tr>
+                  <th>SKU Amazon</th>
+                  <th>Unidades</th>
+                  <th>Receita no extrato</th>
+                  <th>Nome do produto</th>
+                  <th>Custo unitário</th>
+                  <th>Situação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {amazonSkus.map((item) => {
+                  const meta = skuMeta[item.sku] ?? {}
+                  const catalog = products.find((product) => product.sku.toUpperCase() === item.sku.toUpperCase())
+                  const cost = meta.cost ?? catalog?.cost
+                  return (
+                    <tr key={item.sku}>
+                      <td className="order">{item.sku}</td>
+                      <td>{num(item.units)}</td>
+                      <td>{brl(item.revenue)}</td>
+                      <td>
+                        <input
+                          className="sku-input"
+                          value={meta.name ?? ''}
+                          placeholder={catalog?.name ?? 'nome do produto'}
+                          onChange={(event) => save(item.sku, { ...meta, name: event.target.value || undefined })}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="sku-input short"
+                          inputMode="decimal"
+                          value={meta.cost ?? ''}
+                          placeholder={catalog ? String(catalog.cost) : '0,00'}
+                          onChange={(event) => {
+                            const parsed = Number(event.target.value.replace(',', '.'))
+                            save(item.sku, {
+                              ...meta,
+                              cost: event.target.value === '' || Number.isNaN(parsed) ? undefined : parsed,
+                            })
+                          }}
+                        />
+                      </td>
+                      <td>{cost != null ? <Tag value="Conciliado" /> : <Tag value="Pendente" />}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="breakdown-note">
+          Nome e custo ficam salvos neste navegador e alimentam Lucro e Margem na Visão geral e na página de vendas.
+        </p>
+      </Panel>
 
       {notice && (
         <div className="toast" role="status">

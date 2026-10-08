@@ -282,6 +282,9 @@ tr.clickable { cursor: pointer; }
 .data-mode.is-demo { background: #fff6e6; border: 1px solid #f5e2b8; color: #8a6212; }
 .data-mode.is-loading { background: #eaf4ff; border: 1px solid #d3e6fd; color: #1a5daa; }
 .breakdown-note { grid-column: 1 / -1; margin: 9px 0 0; padding: 9px 11px; background: #fff6e6; border: 1px solid #f5e2b8; border-radius: 8px; color: #8a6212; font-size: 10.5px; line-height: 1.55; }
+.sku-input { width: 100%; min-width: 150px; border: 1px solid #d8e5f5; border-radius: 7px; padding: 7px 9px; background: #fff; color: #1e4278; font: 11px 'DM Mono', monospace; outline: 0; transition: border-color .18s ease, box-shadow .18s ease; }
+.sku-input.short { min-width: 90px; max-width: 110px; }
+.sku-input:focus { border-color: #8ec4fa; box-shadow: 0 0 0 3px rgba(140, 196, 250, .3); }
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin { animation: spin .9s linear infinite; }
 .integration-card { display: grid; gap: 15px; align-content: start; transition: transform .2s ease, box-shadow .2s ease; }

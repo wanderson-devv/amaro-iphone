@@ -1,12 +1,13 @@
 import type { Channel } from '../data'
 
-export type SyncResource = 'orders' | 'settlements' | 'inventory' | 'listings'
+export type SyncResource = 'orders' | 'settlements' | 'inventory' | 'listings' | 'finance'
 
 export const syncResources: { key: SyncResource; label: string; scope: string }[] = [
   { key: 'orders', label: 'Pedidos', scope: 'Orders:Advanced' },
   { key: 'settlements', label: 'Repasses e conciliação', scope: 'Finance:Read' },
   { key: 'inventory', label: 'Estoque FBA', scope: 'Inventory:Read' },
   { key: 'listings', label: 'Catálogo e anúncios', scope: 'Product Listing' },
+  { key: 'finance', label: 'Extrato financeiro', scope: 'Finance:Read' },
 ]
 
 export type SyncStatus = 'aguardando' | 'em curso' | 'ok' | 'erro' | 'pendente'

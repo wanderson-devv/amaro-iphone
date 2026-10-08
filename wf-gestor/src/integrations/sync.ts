@@ -94,7 +94,8 @@ export async function runAmazonSync(onUpdate: (states: SyncState[]) => void): Pr
       states[index].detail = result.detail
     } catch (error) {
       const message = error instanceof Error ? error.message : 'falha na consulta'
-      const waiting = /HTTP 403|Unauthorized|Access denied|negado/i.test(message)
+      const quota = /cota/i.test(message)
+      const waiting = !quota && /HTTP 403|Unauthorized|Access denied|negado/i.test(message)
       states[index].status = waiting ? 'pendente' : 'erro'
       states[index].detail = waiting
         ? 'aguardando aprovação da Amazon (role pendente)'

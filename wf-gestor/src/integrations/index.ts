@@ -29,3 +29,14 @@ export {
   useMinuteTick,
 } from './autoSync'
 export type { AutoSyncStatus } from './autoSync'
+export {
+  allocateAds,
+  enrichSales,
+  fetchAmazonFinance,
+  readAmazonSkus,
+  useAmazonFinance,
+  useAmazonSkus,
+  writeAmazonSku,
+  FINANCE_SINCE,
+} from './amazonFinance'
+export type { AmazonSkuInfo, FinanceAd, FinanceOrder, FinanceState, FinanceStatus } from './amazonFinance'
