@@ -133,6 +133,11 @@ export default function DashboardPage({
   const triggerLabel = custom ? `${fullBR(custom.start)} — ${fullBR(custom.end)}` : presetLabel
   const finance = useAmazonFinance(usingReal ? periodo.start : shiftDay(HOJE, -29))
 
+  const refreshFinance = finance.refresh
+  useEffect(() => {
+    if (syncStatus.lastSyncAt) refreshFinance()
+  }, [syncStatus.lastSyncAt, refreshFinance])
+
   const applyPreset = (label: string) => {
     const found = periodPresets.find((item) => item.label === label)!
     setPresetLabel(label)
@@ -280,7 +285,9 @@ export default function DashboardPage({
   const pendingCost = 'informe o custo dos SKUs em Catálogo'
   const pendingAds =
     finance.status !== 'live'
-      ? 'aguardando a API de Ads'
+      ? finance.status === 'inicial'
+        ? 'aguardando o extrato financeiro'
+        : 'extrato financeiro indisponível'
       : finance.source === 'por pedido'
         ? 'cobranças de Ads indisponíveis agora'
         : 'sem cobrança de Ads no período'
@@ -296,7 +303,7 @@ export default function DashboardPage({
     { label: 'Número de Vendas', value: num(kpi.vendas), hint: 'pedidos no recorte', info: 'Quantidade de pedidos aprovados no período filtrado.' },
     { label: 'Número de Unidades Vendidas', value: num(kpi.unidades), hint: 'itens despachados', info: 'Soma das quantidades de todos os itens vendidos.' },
     { label: 'Ticket Médio', value: brl(kpi.ticket), hint: 'faturamento por pedido', info: 'Faturamento bruto dividido pelo número de vendas.' },
-    { label: 'Retorno Sobre Investimento', value: adsGate ? pct(kpi.roi) : '—', hint: adsGate ? 'lucro em relacao ao Ads' : adsHint, tone: adsGate ? (kpi.roi >= 100 ? 'positive' : 'attention') : undefined, info: 'Lucro pós-Ads dividido pelo investimento em Ads.' },
+    { label: 'Retorno Sobre Investimento', value: adsGate ? pct(kpi.roi) : '—', hint: adsGate ? 'lucro em relação ao Ads' : adsHint, tone: adsGate ? (kpi.roi >= 100 ? 'positive' : 'attention') : undefined, info: 'Lucro pós-Ads dividido pelo investimento em Ads.' },
     { label: 'Valor em Ads', value: hasAds ? brl(kpi.ads) : '—', hint: hasAds ? 'investimento em anúncios' : pendingAds, info: 'Soma do gasto com campanhas pagas no período.' },
     { label: 'TACOS', value: hasAds ? pct(kpi.tacos) : '—', hint: hasAds ? 'Ads sobre faturamento' : pendingAds, tone: hasAds ? (kpi.tacos <= 10 ? 'positive' : 'attention') : undefined, info: 'Total de Ads dividido pelo faturamento bruto.' },
     { label: 'Lucro bruto pós ADS', value: adsGate ? brl(kpi.lucroPosAds) : '—', hint: adsGate ? 'descontado o investimento' : adsHint, tone: adsGate ? 'positive' : undefined, info: 'Lucro bruto depois de subtrair o investimento em Ads.' },

@@ -139,29 +139,28 @@ export function useAmazonSales(since: string): AmazonSalesState & { refresh: () 
     sales: [],
     updatedAt: 0,
   })
-  const busy = useRef(false)
+  const requestId = useRef(0)
 
   const load = useCallback(async () => {
-    if (busy.current) return
-    busy.current = true
+    const id = (requestId.current += 1)
 
     try {
       const { sales, detail } = await fetchAmazonSales(since)
-      setState({ status: 'live', message: detail, sales, updatedAt: Date.now() })
+      if (id === requestId.current) setState({ status: 'live', message: detail, sales, updatedAt: Date.now() })
     } catch (error) {
       const failure =
         error instanceof AmazonSalesError
           ? error
           : new AmazonSalesError('erro', (error as Error).message)
-      setState((prev) => ({
-        ...prev,
-        status: failure.status,
-        message: failure.message,
-        hint: failure.hint,
-        updatedAt: Date.now(),
-      }))
-    } finally {
-      busy.current = false
+      if (id === requestId.current) {
+        setState((prev) => ({
+          ...prev,
+          status: failure.status,
+          message: failure.message,
+          hint: failure.hint,
+          updatedAt: Date.now(),
+        }))
+      }
     }
   }, [since])
 

@@ -123,8 +123,7 @@ export async function fetchAmazonFinance(
   }
 
   if (!response.ok) {
-    const quota = /cota/i.test(body.error ?? '')
-    throw new FinanceError(quota ? 'erro' : 'aguardando-credenciais', body.error ?? `HTTP ${response.status}.`, body.detail)
+    throw new FinanceError('erro', body.error ?? `HTTP ${response.status}.`, body.detail)
   }
 
   const detail = body.detail ?? `${body.count ?? 0} pedidos com extrato`

@@ -97,8 +97,11 @@ app.get<{ Params: { resource: string }; Querystring: { since?: string } }>(
       })
     }
 
+    const querySince = request.query.since
     const since =
-      request.query.since ?? new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+      querySince && /^\d{4}-\d{2}-\d{2}$/.test(querySince)
+        ? querySince
+        : new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
 
     try {
       const result = await handlers[resource](since)

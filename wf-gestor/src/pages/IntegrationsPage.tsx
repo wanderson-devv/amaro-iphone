@@ -42,9 +42,10 @@ export default function IntegrationsPage() {
     setProxyUrl(saved)
     setNotice(
       saved
-        ? `Endereço do proxy salvo: ${saved}. A sincronização usará esse servidor.`
+        ? `Endereço do proxy salvo: ${saved}. Sincronizando agora com esse servidor.`
         : 'Campo limpo. Informe o endereço do proxy para sincronizar com a Amazon.',
     )
+    if (saved) void run()
   }
 
   const run = async () => {

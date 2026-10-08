@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="WF Gestor">
+  <rect width="64" height="64" rx="14" fill="#102a5c" />
+  <path
+    d="M13 19h6.6l4.1 20.4L28.6 19h6.1l4.9 20.4L43.7 19H50l-7.4 26h-6.2l-4.6-18.6L27.2 45H21L13 19z"
+    fill="#ffffff"
+  />
+  <circle cx="50" cy="45" r="6" fill="#8ec4fa" />
+</svg>
