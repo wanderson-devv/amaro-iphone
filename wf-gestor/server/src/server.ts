@@ -1,8 +1,16 @@
 import cors from '@fastify/cors'
+import fastifyStatic from '@fastify/static'
 import Fastify from 'fastify'
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { config, isConfigured, missingKeys } from './config.js'
 import { fetchLive, fetchOrdersDetailed, handlers, resourceKeys } from './resources.js'
 import { SpApiError } from './spapi.js'
+
+const here = dirname(fileURLToPath(import.meta.url))
+const distDir = resolve(here, '../../dist')
+const hasFront = existsSync(resolve(distDir, 'index.html'))
 
 const app = Fastify({ logger: true })
 
@@ -13,6 +21,10 @@ app.addHook('onRequest', async (request, reply) => {
 })
 
 await app.register(cors, { origin: config.corsOrigin === '*' ? true : config.corsOrigin.split(',') })
+
+if (hasFront) {
+  await app.register(fastifyStatic, { root: distDir, index: ['index.html'] })
+}
 
 app.get('/health', async () => ({ ok: true, service: 'wf-gestor-proxy' }))
 
@@ -120,6 +132,17 @@ app.get<{ Params: { resource: string }; Querystring: { since?: string } }>(
     }
   },
 )
+
+app.setNotFoundHandler(async (request, reply) => {
+  const path = request.url.split('?')[0]
+  const isApi = path.startsWith('/amazon') || path.startsWith('/health')
+  if (isApi || !hasFront || request.method !== 'GET') {
+    return reply.code(404).send({ ok: false, error: `Rota desconhecida: ${path}` })
+  }
+  return reply
+    .type('text/html; charset=utf-8')
+    .send(readFileSync(resolve(distDir, 'index.html'), 'utf8'))
+})
 
 try {
   await app.listen({ port: config.port, host: config.host })

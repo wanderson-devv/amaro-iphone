@@ -168,5 +168,13 @@ export function useAmazonSales(since: string): AmazonSalesState & { refresh: () 
     void load()
   }, [load])
 
+  useEffect(() => {
+    if (state.status !== 'erro') return
+    const retry = setTimeout(() => {
+      void load()
+    }, 45_000)
+    return () => clearTimeout(retry)
+  }, [state.status, state.updatedAt, load])
+
   return { ...state, refresh }
 }

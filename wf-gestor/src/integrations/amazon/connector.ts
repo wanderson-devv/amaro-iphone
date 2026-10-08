@@ -20,7 +20,7 @@ export function readProxyUrl(): string {
 export function proxyHint(): string {
   const onSecurePage = typeof location !== 'undefined' && location.protocol === 'https:'
   return onSecurePage
-    ? `Sem resposta do proxy local em ${DEFAULT_PROXY_URL}. Rode “npm run proxy” na sua máquina; em páginas https o navegador também pode bloquear a chamada.`
+    ? `Sem resposta do proxy local em ${DEFAULT_PROXY_URL}. Libere o acesso à rede local quando o navegador pedir — em seguida os dados reais aparecem.`
     : `Suba o proxy local com “npm run proxy” para usar dados reais.`
 }
 

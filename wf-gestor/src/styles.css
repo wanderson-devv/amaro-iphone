@@ -278,6 +278,7 @@ tr.clickable { cursor: pointer; }
 .auto-sync small { color: #8ba1bd; font-size: 10.5px; line-height: 1.4; }
 .data-mode { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: -2px 0 18px; padding: 10px 13px; border-radius: 10px; font-size: 11.5px; line-height: 1.5; animation: reveal .3s both; }
 .data-mode b { font-weight: 800; }
+.data-mode a { color: inherit; font-weight: 800; text-decoration: underline; text-underline-offset: 2px; }
 .data-mode.is-live { background: #ecfbf3; border: 1px solid #bfe9d3; color: #14684a; }
 .data-mode.is-demo { background: #fff6e6; border: 1px solid #f5e2b8; color: #8a6212; }
 .data-mode.is-loading { background: #eaf4ff; border: 1px solid #d3e6fd; color: #1a5daa; }

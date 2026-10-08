@@ -14,6 +14,7 @@ import { brl, brlShort, dateBR, num, pct, priorities, sales as demoSales, type S
 import { PageHeader, Panel, StatTile } from '../components/ui'
 import {
   ALL_ORDERS_SINCE,
+  DEFAULT_PROXY_URL,
   allocateAds,
   enrichSales,
   useAmazonFinance,
@@ -97,6 +98,7 @@ export default function DashboardPage({
   const amazon = useAmazonSales(ALL_ORDERS_SINCE)
   const skuMeta = useAmazonSkus()
   const usingReal = amazon.status === 'live' || (amazon.status !== 'inicial' && amazon.sales.length > 0)
+  const onSecurePage = typeof window !== 'undefined' && window.location.protocol === 'https:'
   const base = usingReal ? HOJE : DEMO_HOJE
   const periodPresets = useMemo(() => buildPresets(base), [base])
 
@@ -343,6 +345,12 @@ export default function DashboardPage({
           <>
             <b>{usingReal ? 'Dados reais da última leitura.' : 'Modo demonstração.'}</b> {amazon.message}
             {amazon.hint ? ` · ${amazon.hint}` : ''}
+            {!usingReal && onSecurePage && (
+              <>
+                {' '}
+                <a href={DEFAULT_PROXY_URL}>abrir o app local</a>
+              </>
+            )}
           </>
         )}
       </div>
