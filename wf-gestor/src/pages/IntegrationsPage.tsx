@@ -2,14 +2,14 @@ import { useState } from 'react'
 import { CheckCircle2, CircleHelp, Link, RefreshCw, Save, ShieldCheck } from 'lucide-react'
 import { accounts, num, type Channel } from '../data'
 import {
-  hydrateStates,
-  readLastSync,
+  describeSync,
+  getAutoSyncStatus,
   readProxyUrl,
-  runAmazonSync,
+  runSyncNow,
+  setAutoSyncEnabled,
   syncResources,
+  useAutoSyncStatus,
   writeProxyUrl,
-  type SyncOutcome,
-  type SyncState,
 } from '../integrations'
 import { PageHeader, Panel, StatTile, Tag } from '../components/ui'
 
@@ -30,10 +30,9 @@ const capabilities: Record<Channel, string[]> = {
 export default function IntegrationsPage() {
   const [state, setState] = useState(accounts)
   const [notice, setNotice] = useState('')
-  const [amazonStates, setAmazonStates] = useState<SyncState[]>(hydrateStates)
-  const [running, setRunning] = useState(false)
-  const [outcome, setOutcome] = useState<SyncOutcome | null>(null)
-  const [lastSync, setLastSync] = useState<string | null>(() => readLastSync())
+  const autoSync = useAutoSyncStatus()
+  const running = autoSync.running
+  const amazonStates = autoSync.states
   const [proxyUrl, setProxyUrl] = useState(() => readProxyUrl())
   const configured = Boolean(proxyUrl)
 
@@ -49,14 +48,9 @@ export default function IntegrationsPage() {
   }
 
   const run = async () => {
-    if (running) return
-    setRunning(true)
-    setOutcome(null)
-    const result = await runAmazonSync(setAmazonStates)
-    setOutcome(result)
-    setLastSync(readLastSync())
-    setRunning(false)
-    if (result.ok) {
+    if (autoSync.running) return
+    await runSyncNow()
+    if (getAutoSyncStatus().ok) {
       setState((current) =>
         current.map((account) => (account.channel === 'Amazon' ? { ...account, lastSync: 'agora mesmo' } : account)),
       )
@@ -112,7 +106,12 @@ export default function IntegrationsPage() {
         <StatTile label="Canais conectados" value={`${connected}/${state.length}`} hint="contas autorizadas" tone="positive" />
         <StatTile label="Pedidos sincronizados" value={num(orders)} hint="acumulado das contas" />
         <StatTile label="Aguardando autorização" value={num(state.filter((a) => a.status === 'Pendente').length)} hint="conclua o OAuth" tone="attention" />
-        <StatTile label="Próxima varredura" value="em 6 min" hint="agendamento automático" />
+        <StatTile
+          label="Próxima varredura"
+          value={!autoSync.enabled ? 'pausada' : autoSync.running ? 'agora' : 'em até 5 min'}
+          hint={autoSync.enabled ? 'agendamento automático' : 'auto-sync desligado'}
+          tone={autoSync.enabled ? undefined : 'attention'}
+        />
       </section>
 
       <Panel
@@ -143,6 +142,25 @@ export default function IntegrationsPage() {
             <Save size={14} /> Salvar
           </button>
         </div>
+
+        <label className="auto-sync">
+          <input
+            type="checkbox"
+            checked={autoSync.enabled}
+            onChange={(event) => {
+              setAutoSyncEnabled(event.target.checked)
+              setNotice(
+                event.target.checked
+                  ? 'Sincronização automática ligada: a cada 5 minutos com a aba aberta.'
+                  : 'Sincronização automática pausada. Use “Executar sincronização” quando quiser.',
+              )
+            }}
+          />
+          <span>
+            <b>Sincronização automática</b>
+            <small>pedidos, estoque e financeiro a cada 5 minutos e ao voltar para a aba</small>
+          </span>
+        </label>
 
         <ul className="sync-run-list">
           {amazonStates.map((item) => {
@@ -175,13 +193,13 @@ export default function IntegrationsPage() {
             As credenciais LWA (client_id, client_secret e refresh token) ficam apenas no servidor proxy — o navegador
             recebe somente o resultado de cada consulta.
           </span>
-          <span className="last-sync">Última execução: {lastSync ?? 'nunca'}</span>
+          <span className="last-sync">Última execução: {autoSync.lastSync ?? 'nunca'}</span>
         </div>
 
-        {outcome && (
-          <div className={`sync-outcome ${outcome.ok ? 'is-ok' : 'is-error'}`} role="status">
-            <b>{outcome.message}</b>
-            {outcome.hint && <p>{outcome.hint}</p>}
+        {autoSync.message && (
+          <div className={`sync-outcome ${autoSync.ok === true ? 'is-ok' : 'is-error'}`} role="status">
+            <b>{autoSync.message}</b>
+            {autoSync.hint && <p>{autoSync.hint}</p>}
           </div>
         )}
       </Panel>
@@ -254,7 +272,7 @@ export default function IntegrationsPage() {
         <Panel title="Saúde das sincronizações" hint="Atraso e falhas ficam visíveis">
           <ul className="sync-health">
             <li>
-              <span className="dot on" /> Amazon · pedidos e finanças há 8 min
+              <span className={`dot ${autoSync.ok === true ? 'on' : ''}`} /> Amazon · {describeSync(autoSync)}
             </li>
             <li>
               <span className="dot on" /> Mercado Livre · pedidos há 14 min

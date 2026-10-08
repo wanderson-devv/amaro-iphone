@@ -20,7 +20,15 @@ import OperationsPage from './pages/OperationsPage'
 import IntegrationsPage from './pages/IntegrationsPage'
 import LiveToast from './components/LiveToast'
 import { brl } from './data'
-import { useLiveSales, type LiveSale, type LiveStatus } from './integrations'
+import {
+  describeSync,
+  startAutoSync,
+  useAutoSyncStatus,
+  useLiveSales,
+  useMinuteTick,
+  type LiveSale,
+  type LiveStatus,
+} from './integrations'
 
 type View =
   | 'Visão geral'
@@ -61,6 +69,8 @@ const hora = (iso: string) => {
 export default function App() {
   const [view, setView] = useState<View>('Visão geral')
   const live = useLiveSales(30000)
+  const sync = useAutoSyncStatus()
+  useMinuteTick()
   const [panelOpen, setPanelOpen] = useState(false)
   const [toasts, setToasts] = useState<LiveSale[]>([])
   const notified = useRef<Set<string>>(new Set())
@@ -112,6 +122,21 @@ export default function App() {
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
   }, [panelOpen])
+
+  useEffect(() => {
+    startAutoSync()
+  }, [])
+
+  const syncTone = sync.running
+    ? 'inicial'
+    : !sync.enabled
+      ? 'sem-proxy'
+      : sync.ok === false
+        ? 'erro'
+        : sync.ok === true
+          ? 'live'
+          : 'inicial'
+  const syncTitle = [sync.message, sync.hint].filter(Boolean).join(' · ') || 'Sincronização automática com a Amazon'
 
   const render = () => {
     switch (view) {
@@ -207,7 +232,10 @@ export default function App() {
                 <i />
               )}
             </button>
-            <span className="period">01 mai - 30 mai 2026</span>
+            <span className={`live-chip status-${syncTone}`} title={syncTitle}>
+              <i />
+              {describeSync(sync)}
+            </span>
           </div>
           {panelOpen && (
             <div className="live-panel" ref={panelRef}>

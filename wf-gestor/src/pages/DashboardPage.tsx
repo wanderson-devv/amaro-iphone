@@ -10,35 +10,51 @@ import {
   PackageSearch,
   ReceiptText,
 } from 'lucide-react'
-import { brl, brlShort, dateBR, num, pct, priorities, sales, type SaleStatus } from '../data'
+import { brl, brlShort, dateBR, num, pct, priorities, sales as demoSales, type Sale, type SaleStatus } from '../data'
 import { PageHeader, Panel, StatTile } from '../components/ui'
-import type { LiveFeed } from '../integrations'
+import { useAmazonSales, useAutoSyncStatus, ALL_ORDERS_SINCE, type LiveFeed } from '../integrations'
 
-const HOJE = '2026-05-30'
+const DEMO_HOJE = '2026-05-30'
+const HOJE = new Date().toISOString().slice(0, 10)
 
 type Range = { start: string; end: string }
 
-const presets: { label: string; range: Range }[] = [
-  { label: 'Últimos 3 dias', range: { start: '2026-05-28', end: HOJE } },
-  { label: 'Últimos 7 dias', range: { start: '2026-05-24', end: HOJE } },
-  { label: 'Últimos 30 dias', range: { start: '2026-05-01', end: HOJE } },
-  { label: 'Este mês', range: { start: '2026-05-01', end: '2026-05-31' } },
-  { label: 'Mês anterior', range: { start: '2026-04-01', end: '2026-04-30' } },
-  { label: 'Este ano', range: { start: '2026-01-01', end: '2026-12-31' } },
+const shiftDay = (base: string, days: number) => {
+  const date = new Date(`${base}T12:00:00`)
+  date.setDate(date.getDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+const monthEnd = (base: string) => {
+  const [year, month] = base.split('-').map(Number)
+  const last = new Date(year, month, 0)
+  return `${year}-${String(month).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`
+}
+
+const prevMonth = (base: string) => {
+  const [year, month] = base.split('-').map(Number)
+  const date = new Date(year, month - 2, 1)
+  const start = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`
+  const end = monthEnd(start)
+  return { start, end }
+}
+
+const buildPresets = (base: string): { label: string; range: Range }[] => [
+  { label: 'Últimos 3 dias', range: { start: shiftDay(base, -2), end: base } },
+  { label: 'Últimos 7 dias', range: { start: shiftDay(base, -6), end: base } },
+  { label: 'Últimos 30 dias', range: { start: shiftDay(base, -29), end: base } },
+  { label: 'Este mês', range: { start: `${base.slice(0, 7)}-01`, end: monthEnd(base) } },
+  { label: 'Mês anterior', range: prevMonth(base) },
+  { label: 'Este ano', range: { start: `${base.slice(0, 4)}-01-01`, end: `${base.slice(0, 4)}-12-31` } },
 ]
+
+const PRESET_DEFAULT = 'Últimos 30 dias'
 
 const fullBR = (iso: string) =>
   new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 
 const canais = ['Todas', 'Amazon', 'Mercado Livre', 'Shopee', 'TikTok Shop']
 const situacoes: ('Todos' | SaleStatus)[] = ['Todos', 'Recebido', 'A liberar', 'Em disputa', 'Devolvido']
-
-const channelMix = [
-  { channel: 'Amazon', revenue: 18420.6, share: 43, profit: 4820.1 },
-  { channel: 'Mercado Livre', revenue: 12680.4, share: 30, profit: 2740.9 },
-  { channel: 'Shopee', revenue: 7140.8, share: 16, profit: 1420.3 },
-  { channel: 'TikTok Shop', revenue: 4648.6, share: 11, profit: 864.9 },
-]
 
 type Pt = { x: number; y: number }
 
@@ -68,11 +84,17 @@ export default function DashboardPage({
   onNavigate: (view: string) => void
   live?: LiveFeed
 }) {
+  const syncStatus = useAutoSyncStatus()
+  const amazon = useAmazonSales(ALL_ORDERS_SINCE)
+  const usingReal = amazon.status === 'live' || (amazon.status !== 'inicial' && amazon.sales.length > 0)
+  const base = usingReal ? HOJE : DEMO_HOJE
+  const periodPresets = useMemo(() => buildPresets(base), [base])
+
   const [query, setQuery] = useState('')
-  const [presetLabel, setPresetLabel] = useState(presets[2].label)
+  const [presetLabel, setPresetLabel] = useState(PRESET_DEFAULT)
   const [custom, setCustom] = useState<Range | null>(null)
   const [open, setOpen] = useState(false)
-  const [draft, setDraft] = useState<Range>({ start: presets[0].range.start, end: presets[0].range.end })
+  const [draft, setDraft] = useState<Range>({ start: shiftDay(DEMO_HOJE, -2), end: DEMO_HOJE })
   const [canal, setCanal] = useState(canais[0])
   const [situacao, setSituacao] = useState<'Todos' | SaleStatus>('Todos')
   const pickerRef = useRef<HTMLDivElement>(null)
@@ -86,11 +108,22 @@ export default function DashboardPage({
     return () => document.removeEventListener('mousedown', onDoc)
   }, [open])
 
-  const periodo: Range = custom ?? presets.find((item) => item.label === presetLabel)!.range
+  useEffect(() => {
+    setCustom(null)
+    setPresetLabel(PRESET_DEFAULT)
+    setDraft({ start: shiftDay(base, -2), end: base })
+  }, [base])
+
+  const refresh = amazon.refresh
+  useEffect(() => {
+    if (syncStatus.lastSyncAt) refresh()
+  }, [syncStatus.lastSyncAt, refresh])
+
+  const periodo: Range = custom ?? periodPresets.find((item) => item.label === presetLabel)!.range
   const triggerLabel = custom ? `${fullBR(custom.start)} — ${fullBR(custom.end)}` : presetLabel
 
   const applyPreset = (label: string) => {
-    const found = presets.find((item) => item.label === label)!
+    const found = periodPresets.find((item) => item.label === label)!
     setPresetLabel(label)
     setCustom(null)
     setDraft(found.range)
@@ -105,14 +138,17 @@ export default function DashboardPage({
     setOpen(false)
   }
 
+  const source = usingReal ? amazon.sales : demoSales
+  const hasFinancials = source.some((sale) => !sale.partial)
+
   const filtered = useMemo(() => {
-    return sales.filter((sale) => {
+    return source.filter((sale) => {
       const okPeriodo = sale.date >= periodo.start && sale.date <= periodo.end
       const okCanal = canal === 'Todas' || sale.channel === canal
       const okSituacao = situacao === 'Todos' || sale.status === situacao
       return okPeriodo && okCanal && okSituacao
     })
-  }, [periodo, canal, situacao])
+  }, [source, periodo, canal, situacao])
 
   const kpi = useMemo(() => {
     const acc = filtered.reduce(
@@ -158,7 +194,38 @@ export default function DashboardPage({
   }, [filtered])
 
   const dates = filtered.map((sale) => sale.date).sort()
-  const range = dates.length ? `${dateBR(dates[0])} a ${dateBR(dates[dates.length - 1])} de 2026` : 'sem movimento no período'
+  const range = dates.length
+    ? `${fullBR(dates[0])} a ${fullBR(dates[dates.length - 1])}`
+    : 'sem movimento no período'
+
+  const channelMix = useMemo(() => {
+    const acc = new Map<string, { revenue: number; profit: number }>()
+    filtered.forEach((sale) => {
+      const current = acc.get(sale.channel) ?? { revenue: 0, profit: 0 }
+      current.revenue += sale.gross
+      current.profit += sale.profit
+      acc.set(sale.channel, current)
+    })
+    const total = [...acc.values()].reduce((sum, item) => sum + item.revenue, 0)
+    return [...acc.entries()]
+      .map(([channel, value]) => ({
+        channel,
+        revenue: value.revenue,
+        profit: value.profit,
+        share: total > 0 ? Math.round((value.revenue / total) * 100) : 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue)
+  }, [filtered])
+
+  const peak = daily.reduce<{ date: string; revenue: number } | null>(
+    (best, item) => (best && best.revenue >= item.revenue ? best : { date: item.date, revenue: item.revenue }),
+    null,
+  )
+  const weakest = hasFinancials
+    ? filtered
+        .filter((sale) => sale.gross > 0)
+        .reduce<Sale | null>((worst, sale) => (worst && worst.margin <= sale.margin ? worst : sale), null)
+    : null
 
   const width = 900
   const height = 260
@@ -173,29 +240,33 @@ export default function DashboardPage({
     .filter((sale) => `${sale.id} ${sale.product} ${sale.channel}`.toLowerCase().includes(query.toLowerCase()))
     .slice(0, 6)
 
-  const knownIds = new Set(sales.map((sale) => sale.id))
   const livePendingIds = new Set((live?.pending ?? []).map((sale) => sale.id))
+  const filteredIds = new Set(filtered.map((sale) => sale.id))
   const liveRows = (live?.sales ?? [])
-    .filter(
-      (sale) =>
-        !knownIds.has(sale.id) &&
-        `${sale.id} ${sale.product ?? ''}`.toLowerCase().includes(query.toLowerCase()),
-    )
+    .filter((sale) => {
+      const day = sale.purchasedAt.slice(0, 10)
+      const inPeriod = day >= periodo.start && day <= periodo.end
+      const matchesQuery = `${sale.id} ${sale.product ?? ''}`.toLowerCase().includes(query.toLowerCase())
+      return !filteredIds.has(sale.id) && inPeriod && matchesQuery
+    })
     .slice(0, 3)
+
+  const pendingFees = 'aguardando a liberação de Fees'
+  const pendingAds = 'aguardando a API de Ads'
 
   const kpis: { label: string; value: string; hint: string; tone?: 'positive' | 'attention'; info?: string }[] = [
     { label: 'Faturamento', value: brl(kpi.faturamento), hint: 'vendas brutas aprovadas', info: 'Soma dos valores de venda antes de taxas, impostos e custos.' },
-    { label: 'Líq. do Marketplace', value: brl(kpi.liquido), hint: 'após comissões e impostos', info: 'Valor que o marketplace repassa depois das taxas e impostos.' },
-    { label: 'Lucro Bruto', value: brl(kpi.lucroBruto), hint: 'líquido menos custo do produto', tone: 'positive', info: 'Líquido do marketplace subtraído do custo dos produtos vendidos.' },
-    { label: 'Margem', value: pct(kpi.margem), hint: 'sobre o faturamento bruto', info: 'Lucro bruto dividido pelo faturamento bruto.' },
+    { label: 'Líq. do Marketplace', value: hasFinancials ? brl(kpi.liquido) : '—', hint: hasFinancials ? 'após comissões e impostos' : pendingFees, info: 'Valor que o marketplace repassa depois das taxas e impostos.' },
+    { label: 'Lucro Bruto', value: hasFinancials ? brl(kpi.lucroBruto) : '—', hint: hasFinancials ? 'líquido menos custo do produto' : pendingFees, tone: hasFinancials ? 'positive' : undefined, info: 'Líquido do marketplace subtraído do custo dos produtos vendidos.' },
+    { label: 'Margem', value: hasFinancials ? pct(kpi.margem) : '—', hint: hasFinancials ? 'sobre o faturamento bruto' : pendingFees, info: 'Lucro bruto dividido pelo faturamento bruto.' },
     { label: 'Número de Vendas', value: num(kpi.vendas), hint: 'pedidos no recorte', info: 'Quantidade de pedidos aprovados no período filtrado.' },
     { label: 'Número de Unidades Vendidas', value: num(kpi.unidades), hint: 'itens despachados', info: 'Soma das quantidades de todos os itens vendidos.' },
     { label: 'Ticket Médio', value: brl(kpi.ticket), hint: 'faturamento por pedido', info: 'Faturamento bruto dividido pelo número de vendas.' },
-    { label: 'Retorno Sobre Investimento', value: pct(kpi.roi), hint: 'lucro em relacao ao Ads', tone: kpi.roi >= 100 ? 'positive' : 'attention', info: 'Lucro pós-Ads dividido pelo investimento em Ads.' },
-    { label: 'Valor em Ads', value: brl(kpi.ads), hint: 'investimento em anúncios', info: 'Soma do gasto com campanhas pagas no período.' },
-    { label: 'TACOS', value: pct(kpi.tacos), hint: 'Ads sobre faturamento', tone: kpi.tacos <= 10 ? 'positive' : 'attention', info: 'Total de Ads dividido pelo faturamento bruto.' },
-    { label: 'Lucro bruto pós ADS', value: brl(kpi.lucroPosAds), hint: 'descontado o investimento', tone: 'positive', info: 'Lucro bruto depois de subtrair o investimento em Ads.' },
-    { label: 'MPA', value: pct(kpi.mpa), hint: 'margem depois do Ads', tone: 'positive', info: 'Margem pós-Ads: lucro pós-Ads sobre o faturamento bruto.' },
+    { label: 'Retorno Sobre Investimento', value: hasFinancials ? pct(kpi.roi) : '—', hint: hasFinancials ? 'lucro em relacao ao Ads' : pendingAds, tone: hasFinancials ? (kpi.roi >= 100 ? 'positive' : 'attention') : undefined, info: 'Lucro pós-Ads dividido pelo investimento em Ads.' },
+    { label: 'Valor em Ads', value: hasFinancials ? brl(kpi.ads) : '—', hint: hasFinancials ? 'investimento em anúncios' : pendingAds, info: 'Soma do gasto com campanhas pagas no período.' },
+    { label: 'TACOS', value: hasFinancials ? pct(kpi.tacos) : '—', hint: hasFinancials ? 'Ads sobre faturamento' : pendingAds, tone: hasFinancials ? (kpi.tacos <= 10 ? 'positive' : 'attention') : undefined, info: 'Total de Ads dividido pelo faturamento bruto.' },
+    { label: 'Lucro bruto pós ADS', value: hasFinancials ? brl(kpi.lucroPosAds) : '—', hint: hasFinancials ? 'descontado o investimento' : pendingAds, tone: hasFinancials ? 'positive' : undefined, info: 'Lucro bruto depois de subtrair o investimento em Ads.' },
+    { label: 'MPA', value: hasFinancials ? pct(kpi.mpa) : '—', hint: hasFinancials ? 'margem depois do Ads' : pendingAds, tone: hasFinancials ? 'positive' : undefined, info: 'Margem pós-Ads: lucro pós-Ads sobre o faturamento bruto.' },
   ]
 
   return (
@@ -215,6 +286,24 @@ export default function DashboardPage({
         }
       />
 
+      <div
+        className={`data-mode ${amazon.status === 'inicial' ? 'is-loading' : amazon.status === 'live' ? 'is-live' : 'is-demo'}`}
+      >
+        {amazon.status === 'inicial' && <>Lendo pedidos reais da Amazon…</>}
+        {amazon.status === 'live' && (
+          <>
+            <b>Dados reais da Amazon.</b> {amazon.message} · atualizado às{' '}
+            {new Date(amazon.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+          </>
+        )}
+        {amazon.status !== 'inicial' && amazon.status !== 'live' && (
+          <>
+            <b>{usingReal ? 'Dados reais da última leitura.' : 'Modo demonstração.'}</b> {amazon.message}
+            {amazon.hint ? ` · ${amazon.hint}` : ''}
+          </>
+        )}
+      </div>
+
       <section className="dashboard-filters">
         <span className="range-chip">{range}</span>
         <div className="filter-row">
@@ -232,7 +321,7 @@ export default function DashboardPage({
               <div className="period-pop">
                 <p className="pop-title">Período personalizado</p>
                 <div className="period-presets">
-                  {presets.map((item) => (
+                  {periodPresets.map((item) => (
                     <button
                       key={item.label}
                       type="button"
@@ -271,8 +360,8 @@ export default function DashboardPage({
                       className="ghost"
                       onClick={() => {
                         setCustom(null)
-                        setPresetLabel(presets[2].label)
-                        setDraft(presets[2].range)
+                        setPresetLabel(PRESET_DEFAULT)
+                        setDraft(periodPresets[2].range)
                         setOpen(false)
                       }}
                     >
@@ -327,10 +416,10 @@ export default function DashboardPage({
           </div>
           <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-label="Resumo diário de receitas, líquido e lucro">
             <path className="area area-revenue" d={areaPath(toPoints('revenue'), height)} />
-            <path className="area area-net" d={areaPath(toPoints('net'), height)} />
-            <path className="area area-profit" d={areaPath(toPoints('profit'), height)} />
+            {hasFinancials && <path className="area area-net" d={areaPath(toPoints('net'), height)} />}
+            {hasFinancials && <path className="area area-profit" d={areaPath(toPoints('profit'), height)} />}
             <path className="revenue-line" d={linePath(toPoints('revenue'))} />
-            <path className="profit-line" d={linePath(toPoints('profit'))} />
+            {hasFinancials && <path className="profit-line" d={linePath(toPoints('profit'))} />}
           </svg>
           <div className="chart-labels">
             {daily.map((item) => (
@@ -342,13 +431,22 @@ export default function DashboardPage({
           <span>
             <i className="revenue-dot" /> Faturamento
           </span>
-          <span>
-            <i className="net-dot" /> Líquido do marketplace
+          {hasFinancials && (
+            <span>
+              <i className="net-dot" /> Líquido do marketplace
+            </span>
+          )}
+          {hasFinancials && (
+            <span>
+              <i className="profit-dot" /> Lucro
+            </span>
+          )}
+          <span className="synced">
+            {daily.length} dias ·{' '}
+            {usingReal
+              ? `atualizado ${new Date(amazon.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+              : 'base de demonstração'}
           </span>
-          <span>
-            <i className="profit-dot" /> Lucro
-          </span>
-          <span className="synced">{daily.length} dias · dados há 8 min</span>
         </div>
       </Panel>
 
@@ -379,7 +477,10 @@ export default function DashboardPage({
                 <span>{item.channel}</span>
                 <div className="dual-track">
                   <i className="bar-sales" style={{ width: `${item.share * 2}%` }} />
-                  <i className="bar-spend" style={{ width: `${(item.profit / item.revenue) * item.share * 2}%` }} />
+                  <i
+                    className="bar-spend"
+                    style={{ width: `${item.revenue > 0 ? (item.profit / item.revenue) * item.share * 2 : 0}%` }}
+                  />
                 </div>
                 <b>{pct(item.share, 0)}</b>
               </div>
@@ -440,17 +541,27 @@ export default function DashboardPage({
                 </tr>
               ))}
               {visibleSales.map((sale) => (
-                <tr key={sale.id} className="clickable" onClick={() => onNavigate('Vendas')}>
+                <tr
+                  key={sale.id}
+                  className={livePendingIds.has(sale.id) ? 'clickable row-new' : 'clickable'}
+                  onClick={() => onNavigate('Vendas')}
+                >
                   <td className="order">{sale.id}</td>
                   <td>
                     <b>{sale.product}</b>
+                    <small className="sub">{sale.qty === 1 ? '1 unidade' : `${sale.qty} unidades`}</small>
+                    {livePendingIds.has(sale.id) && (
+                      <span className="live-flag">
+                        <i /> Ao vivo
+                      </span>
+                    )}
                   </td>
                   <td>
                     <span className="channel">{sale.channel}</span>
                   </td>
                   <td>{brl(sale.gross)}</td>
-                  <td className="profit">{brl(sale.profit)}</td>
-                  <td>{pct(sale.margin)}</td>
+                  <td className="profit">{sale.partial ? '—' : brl(sale.profit)}</td>
+                  <td>{sale.partial ? '—' : pct(sale.margin)}</td>
                   <td>
                     <span className={`tag ${sale.status === 'Recebido' ? 'tag-ok' : 'tag-info'}`}>{sale.status}</span>
                   </td>
@@ -473,8 +584,9 @@ export default function DashboardPage({
         <div>
           <b>Como ler este painel</b>
           <p>
-            Os 12 indicadores são recalculados a cada filtro. Cada venda mantém a memória de cálculo com comissões, taxas,
-            impostos, custo e Ads — clique em qualquer linha para abrir o extrato completo.
+            Os 12 indicadores são recalculados a cada filtro e vêm dos pedidos reais da Amazon quando o proxy está no ar.
+            Indicadores marcados com “—” aguardam a liberação das APIs de Fees e Ads pela Amazon — clique em qualquer
+            linha para abrir o pedido na página de vendas.
           </p>
         </div>
         <button className="ghost" onClick={() => onNavigate('Análises')}>
@@ -484,11 +596,16 @@ export default function DashboardPage({
 
       <section className="footnote metrics-note">
         <span>
-          <ArrowUpRight size={14} /> Pico de receita em {daily.length ? dateBR(daily[daily.length - 1].date) : '—'} com{' '}
-          {daily.length ? brl(daily[daily.length - 1].revenue) : brl(0)}
+          <ArrowUpRight size={14} /> Pico de receita em {peak ? dateBR(peak.date) : '—'} com{' '}
+          {peak ? brl(peak.revenue) : brl(0)}
         </span>
         <span>
-          <ArrowDownRight size={14} /> Menor margem em devoluções de acrílico
+          <ArrowDownRight size={14} />{' '}
+          {hasFinancials
+            ? weakest
+              ? `Menor margem em ${weakest.product}`
+              : 'Sem margem calculada no recorte'
+            : 'Lucro e margem aguardam a liberação de Fees'}
         </span>
       </section>
     </>

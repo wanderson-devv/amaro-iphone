@@ -155,6 +155,12 @@ const LIVE_LIMIT = 10
 let liveCache: { key: string; expiresAt: number; value: LiveResult } | null = null
 let itemsUnavailable = false
 
+const DETAIL_TTL_MS = 60_000
+const DETAIL_ENRICH_LIMIT = 8
+const ITEM_CACHE_MAX = 400
+const itemCache = new Map<string, DetailedItem[]>()
+let detailCache: { key: string; expiresAt: number; value: DetailedResult } | null = null
+
 type RawOrder = {
   AmazonOrderId?: string
   PurchaseDate?: string
@@ -165,17 +171,84 @@ type RawOrder = {
   NumberOfItemsUnshipped?: number
 }
 
-async function readProductTitle(orderId: string): Promise<string | undefined> {
-  if (itemsUnavailable) return undefined
+export type DetailedItem = {
+  title?: string
+  sku?: string
+  asin?: string
+  qty: number
+  price: number
+}
+
+export type DetailedOrder = {
+  id: string
+  purchasedAt: string
+  updatedAt: string
+  status: string
+  amount: number
+  currency: string
+  units: number
+  items: DetailedItem[]
+}
+
+export type DetailedResult = {
+  count: number
+  detail: string
+  orders: DetailedOrder[]
+  enriched: number
+  fetchedAt: string
+}
+
+async function readOrderItems(orderId: string): Promise<DetailedItem[] | null> {
+  if (itemsUnavailable) return null
+
+  const cached = itemCache.get(orderId)
+  if (cached) return cached
+
   try {
     const response = (await spGet(`/orders/v0/orders/${orderId}/order-items`)) as SpPayload<{
-      OrderItems?: { Title?: string }[]
+      OrderItems?: {
+        Title?: string
+        SellerSKU?: string
+        ASIN?: string
+        QuantityOrdered?: number
+        ItemPrice?: { Amount?: string }
+      }[]
     }>
-    return unwrap<{ OrderItems?: { Title?: string }[] }>(response).OrderItems?.[0]?.Title
+
+    const items = (unwrap<{ OrderItems?: { Title?: string }[] }>(response).OrderItems ?? []).map(
+      (item) => {
+        const raw = item as {
+          Title?: string
+          SellerSKU?: string
+          ASIN?: string
+          QuantityOrdered?: number
+          ItemPrice?: { Amount?: string }
+        }
+        return {
+          title: raw.Title,
+          sku: raw.SellerSKU,
+          asin: raw.ASIN,
+          qty: Number(raw.QuantityOrdered ?? 1) || 1,
+          price: Number(raw.ItemPrice?.Amount ?? 0) || 0,
+        } satisfies DetailedItem
+      },
+    )
+
+    itemCache.set(orderId, items)
+    if (itemCache.size > ITEM_CACHE_MAX) {
+      const oldest = itemCache.keys().next().value
+      if (oldest) itemCache.delete(oldest)
+    }
+    return items
   } catch (error) {
     if (error instanceof SpApiError && error.message.includes('403')) itemsUnavailable = true
-    return undefined
+    return null
   }
+}
+
+async function readProductTitle(orderId: string): Promise<string | undefined> {
+  const items = await readOrderItems(orderId)
+  return items?.[0]?.title
 }
 
 export async function fetchLive(since: string): Promise<LiveResult> {
@@ -236,6 +309,72 @@ export async function fetchLive(since: string): Promise<LiveResult> {
   }
 
   liveCache = { key: since, expiresAt: Date.now() + LIVE_TTL_MS, value }
+  return value
+}
+
+export async function fetchOrdersDetailed(since: string): Promise<DetailedResult> {
+  if (detailCache && detailCache.key === since && detailCache.expiresAt > Date.now()) {
+    return detailCache.value
+  }
+
+  const createdAfter = new Date(`${since}T00:00:00Z`).toISOString()
+  const collected: RawOrder[] = []
+  let nextToken: string | undefined
+
+  for (let page = 0; page < 10; page += 1) {
+    const response = (await spGet('/orders/v0/orders', {
+      MarketplaceIds: config.marketplaceId,
+      CreatedAfter: createdAfter,
+      MaxOrdersPerPage: '100',
+      NextToken: nextToken,
+    })) as SpPayload<{ Orders?: RawOrder[]; NextToken?: string }>
+
+    const payload = unwrap<{ Orders?: RawOrder[]; NextToken?: string }>(response)
+    const orders = payload.Orders ?? []
+    collected.push(...orders)
+    nextToken = payload.NextToken
+    if (!nextToken || orders.length === 0) break
+  }
+
+  const orders: DetailedOrder[] = collected
+    .map((order) => ({
+      id: order.AmazonOrderId ?? '',
+      purchasedAt: order.PurchaseDate ?? '',
+      updatedAt: order.LastUpdateDate ?? '',
+      status: order.OrderStatus ?? '',
+      amount: Number(order.OrderTotal?.Amount ?? 0),
+      currency: order.OrderTotal?.CurrencyCode ?? 'BRL',
+      units: (order.NumberOfItemsShipped ?? 0) + (order.NumberOfItemsUnshipped ?? 0),
+      items: [] as DetailedItem[],
+    }))
+    .filter((order) => order.id && order.purchasedAt)
+    .sort((a, b) => (b.purchasedAt > a.purchasedAt ? 1 : -1))
+
+  let enriched = 0
+  if (!itemsUnavailable) {
+    for (const order of orders.slice(0, DETAIL_ENRICH_LIMIT)) {
+      const items = await readOrderItems(order.id)
+      if (items?.length) {
+        order.items = items
+        const qty = items.reduce((sum, item) => sum + item.qty, 0)
+        if (qty > 0) order.units = qty
+        enriched += 1
+      }
+      if (itemsUnavailable) break
+    }
+  }
+
+  const value: DetailedResult = {
+    count: orders.length,
+    detail: itemsUnavailable
+      ? `${orders.length} pedidos · itens detalhados aguardando aprovação da Amazon`
+      : `${orders.length} pedidos desde ${since} · ${enriched} com itens detalhados`,
+    orders,
+    enriched,
+    fetchedAt: new Date().toISOString(),
+  }
+
+  detailCache = { key: since, expiresAt: Date.now() + DETAIL_TTL_MS, value }
   return value
 }
 

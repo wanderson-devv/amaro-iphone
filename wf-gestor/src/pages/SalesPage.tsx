@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Download, Filter, Search, X } from 'lucide-react'
-import { brl, num, pct, sales, type Sale } from '../data'
+import { brl, num, pct, sales as demoSales, type Sale } from '../data'
+import { ALL_ORDERS_SINCE, useAmazonSales } from '../integrations'
 import { PageHeader, Panel, StatTile, Tag } from '../components/ui'
 
 const channels = ['Todos', 'Amazon', 'Mercado Livre', 'Shopee', 'TikTok Shop']
@@ -12,15 +13,20 @@ export default function SalesPage() {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<Sale | null>(null)
 
+  const amazon = useAmazonSales(ALL_ORDERS_SINCE)
+  const usingReal = amazon.status === 'live' || (amazon.status !== 'inicial' && amazon.sales.length > 0)
+  const source = usingReal ? amazon.sales : demoSales
+  const hasFinancials = source.some((sale) => !sale.partial)
+
   const filtered = useMemo(
     () =>
-      sales.filter((sale) => {
+      source.filter((sale) => {
         const matchesChannel = channel === 'Todos' || sale.channel === channel
         const matchesStatus = status === 'Todos' || sale.status === status
         const haystack = `${sale.id} ${sale.product} ${sale.sku} ${sale.externalSku}`.toLowerCase()
         return matchesChannel && matchesStatus && haystack.includes(query.toLowerCase())
       }),
-    [channel, status, query],
+    [source, channel, status, query],
   )
 
   const totals = filtered.reduce(
@@ -51,9 +57,31 @@ export default function SalesPage() {
       <section className="metrics">
         <StatTile label="Pedidos filtrados" value={num(filtered.length)} hint={`${num(totals.qty)} unidades`} />
         <StatTile label="Faturamento" value={brl(totals.gross)} hint="bruto no recorte" />
-        <StatTile label="Líquido do marketplace" value={brl(totals.net)} hint="após taxas e impostos" />
-        <StatTile label="Lucro" value={brl(totals.profit)} hint={`margem de ${pct(margin)}`} tone="positive" />
+        <StatTile
+          label="Líquido do marketplace"
+          value={hasFinancials ? brl(totals.net) : '—'}
+          hint={hasFinancials ? 'após taxas e impostos' : 'aguardando a liberação de Fees'}
+        />
+        <StatTile
+          label="Lucro"
+          value={hasFinancials ? brl(totals.profit) : '—'}
+          hint={hasFinancials ? `margem de ${pct(margin)}` : 'aguardando a liberação de Fees'}
+          tone="positive"
+        />
       </section>
+
+      {!usingReal && (
+        <div className="data-mode is-demo">
+          <b>Modo demonstração.</b> {amazon.message}
+          {amazon.hint ? ` · ${amazon.hint}` : ''}
+        </div>
+      )}
+      {usingReal && amazon.status !== 'live' && (
+        <div className="data-mode is-demo">
+          <b>Última leitura disponível.</b> {amazon.message}
+          {amazon.hint ? ` · ${amazon.hint}` : ''}
+        </div>
+      )}
 
       <Panel
         title="Vendas realizadas"
@@ -112,18 +140,20 @@ export default function SalesPage() {
                   <td className="mono">{new Date(`${sale.date}T12:00:00`).toLocaleDateString('pt-BR')}</td>
                   <td>
                     <b>{sale.product}</b>
-                    <small className="sub">{sale.sku}</small>
+                    <small className="sub">{sale.sku === '—' ? `${sale.qty} un.` : sale.sku}</small>
                   </td>
                   <td>
                     <span className="channel">{sale.channel}</span>
                   </td>
                   <td>{sale.qty}</td>
                   <td>{brl(sale.gross)}</td>
-                  <td className="muted">{brl(sale.commission + sale.fees)}</td>
-                  <td className="muted">{brl(sale.cost)}</td>
-                  <td className="muted">{brl(sale.taxes)}</td>
-                  <td className={sale.profit >= 0 ? 'profit' : 'loss'}>{brl(sale.profit)}</td>
-                  <td>{pct(sale.margin)}</td>
+                  <td className="muted">{sale.partial ? '—' : brl(sale.commission + sale.fees)}</td>
+                  <td className="muted">{sale.partial ? '—' : brl(sale.cost)}</td>
+                  <td className="muted">{sale.partial ? '—' : brl(sale.taxes)}</td>
+                  <td className={sale.partial ? 'muted' : sale.profit >= 0 ? 'profit' : 'loss'}>
+                    {sale.partial ? '—' : brl(sale.profit)}
+                  </td>
+                  <td>{sale.partial ? '—' : pct(sale.margin)}</td>
                   <td>
                     <Tag value={sale.status} />
                   </td>
@@ -182,26 +212,31 @@ export default function SalesPage() {
                 ['Preço unitário', brl(selected.unitPrice)],
                 ['Quantidade', num(selected.qty)],
                 ['Faturamento bruto', brl(selected.gross)],
-                ['(−) Comissão do marketplace', `− ${brl(selected.commission)}`],
-                ['(−) Taxas de serviço', `− ${brl(selected.fees)}`],
-                ['(−) Impostos', `− ${brl(selected.taxes)}`],
-                ['Líquido recebido', brl(selected.net)],
-                ['(−) Custo do produto', `− ${brl(selected.cost)}`],
-                ['(−) Investimento em Ads', `− ${brl(selected.ads)}`],
+                ['(−) Comissão do marketplace', selected.partial ? '—' : `− ${brl(selected.commission)}`],
+                ['(−) Taxas de serviço', selected.partial ? '—' : `− ${brl(selected.fees)}`],
+                ['(−) Impostos', selected.partial ? '—' : `− ${brl(selected.taxes)}`],
+                ['Líquido recebido', selected.partial ? '—' : brl(selected.net)],
+                ['(−) Custo do produto', selected.partial ? '—' : `− ${brl(selected.cost)}`],
+                ['(−) Investimento em Ads', selected.partial ? '—' : `− ${brl(selected.ads)}`],
               ].map(([label, value]) => (
                 <div key={label} className={label.startsWith('(') ? 'deduction' : ''}>
                   <span>{label}</span>
                   <b>{value}</b>
                 </div>
               ))}
-              <div className={`total ${selected.profit < 0 ? 'is-loss' : ''}`}>
+              <div className={`total ${!selected.partial && selected.profit < 0 ? 'is-loss' : ''}`}>
                 <span>Lucro da venda</span>
-                <b>{brl(selected.profit)}</b>
+                <b>{selected.partial ? '—' : brl(selected.profit)}</b>
               </div>
               <div className="total">
                 <span>Margem líquida</span>
-                <b>{pct(selected.margin)}</b>
+                <b>{selected.partial ? '—' : pct(selected.margin)}</b>
               </div>
+              {selected.partial && (
+                <p className="breakdown-note">
+                  Comissões, impostos e repasses aparecem aqui quando a Amazon liberar a API de Fees para o app.
+                </p>
+              )}
             </div>
 
             <div className="drawer-footer">

@@ -38,6 +38,7 @@ export type Sale = {
   margin: number
   status: SaleStatus
   settlement: 'Conciliado' | 'Pendente' | 'Divergente'
+  partial?: boolean
 }
 
 type SaleSeed = {

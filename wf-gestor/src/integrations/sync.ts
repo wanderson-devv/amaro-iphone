@@ -80,6 +80,8 @@ export async function runAmazonSync(onUpdate: (states: SyncState[]) => void): Pr
     return { ok: false, message, hint: error instanceof SyncError ? error.hint : undefined }
   }
 
+  const problems: string[] = []
+
   for (const [index, item] of syncResources.entries()) {
     states[index].status = 'em curso'
     states[index].detail = 'consultando a Amazon…'
@@ -91,30 +93,46 @@ export async function runAmazonSync(onUpdate: (states: SyncState[]) => void): Pr
       states[index].count = result.count
       states[index].detail = result.detail
     } catch (error) {
-      states[index].status = 'erro'
-      states[index].detail = error instanceof Error ? error.message : 'falha na consulta'
-      emit()
-      return {
-        ok: false,
-        message: states[index].detail ?? 'Sincronização interrompida.',
-        hint: error instanceof SyncError ? error.hint : undefined,
-      }
+      const message = error instanceof Error ? error.message : 'falha na consulta'
+      const waiting = /HTTP 403|Unauthorized|Access denied|negado/i.test(message)
+      states[index].status = waiting ? 'pendente' : 'erro'
+      states[index].detail = waiting
+        ? 'aguardando aprovação da Amazon (role pendente)'
+        : message
+      problems.push(item.label)
     }
 
     emit()
   }
 
+  const okStates = states.filter((item) => item.status === 'ok')
   const stamp = new Date().toLocaleString('pt-BR')
-  write(LAST_SYNC_KEY, stamp)
-  write(
-    SNAPSHOT_KEY,
-    JSON.stringify(Object.fromEntries(states.map((item) => [item.resource, item.count]))),
-  )
 
-  const total = states.reduce((sum, item) => sum + item.count, 0)
+  if (okStates.length) {
+    write(LAST_SYNC_KEY, stamp)
+    write(
+      SNAPSHOT_KEY,
+      JSON.stringify(Object.fromEntries(okStates.map((item) => [item.resource, item.count]))),
+    )
+  }
+
+  const total = okStates.reduce((sum, item) => sum + item.count, 0)
+
+  if (!okStates.length) {
+    return {
+      ok: false,
+      message: problems.length
+        ? `Nenhum recurso disponível · ${problems.join(', ')}`
+        : 'Sincronização sem resultados.',
+      hint: health.detail,
+    }
+  }
+
   return {
     ok: true,
-    message: `Sincronização concluída · ${total} registros · ${stamp}`,
+    message: problems.length
+      ? `Sincronizado: ${okStates.length}/${states.length} recursos · ${total} registros · ${stamp} · aguardando: ${problems.join(', ')}`
+      : `Sincronização concluída · ${total} registros · ${stamp}`,
     hint: health.detail,
   }
 }

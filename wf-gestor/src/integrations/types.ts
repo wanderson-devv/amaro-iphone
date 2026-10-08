@@ -9,7 +9,7 @@ export const syncResources: { key: SyncResource; label: string; scope: string }[
   { key: 'listings', label: 'Catálogo e anúncios', scope: 'Product Listing' },
 ]
 
-export type SyncStatus = 'aguardando' | 'em curso' | 'ok' | 'erro'
+export type SyncStatus = 'aguardando' | 'em curso' | 'ok' | 'erro' | 'pendente'
 
 export type SyncState = {
   resource: SyncResource
