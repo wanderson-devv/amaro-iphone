@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Sale, SaleStatus } from '../data'
-import { readProxyUrl } from './amazon/connector'
+import { proxyHint, readProxyUrl } from './amazon/connector'
 
 export type DetailedItem = { title?: string; sku?: string; asin?: string; qty: number; price: number }
 
@@ -95,11 +95,7 @@ export async function fetchAmazonSales(since: string): Promise<{ sales: Sale[]; 
       headers: { Accept: 'application/json' },
     })
   } catch {
-    throw new AmazonSalesError(
-      'erro',
-      'Proxy SP-API indisponível.',
-      'Suba o proxy local com “npm run proxy” para usar dados reais.',
-    )
+    throw new AmazonSalesError('erro', 'Proxy SP-API indisponível.', proxyHint())
   }
 
   const body = (await response.json().catch(() => ({}))) as {

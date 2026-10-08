@@ -3,10 +3,7 @@ import { SyncError } from '../types'
 
 const STORE_KEY = 'wf.spApiProxy'
 const ENV_URL = (import.meta.env.VITE_SP_API_PROXY as string | undefined) ?? ''
-const LOCAL_URL = 'http://localhost:8787'
-const IS_LOCAL =
-  typeof location !== 'undefined' &&
-  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+export const DEFAULT_PROXY_URL = 'http://127.0.0.1:8787'
 
 const normalize = (value: string) => value.trim().replace(/\/+$/, '')
 
@@ -17,7 +14,14 @@ export function readProxyUrl(): string {
   } catch {
     /* armazenamento indisponível */
   }
-  return normalize(ENV_URL) || (IS_LOCAL ? LOCAL_URL : '')
+  return normalize(ENV_URL) || DEFAULT_PROXY_URL
+}
+
+export function proxyHint(): string {
+  const onSecurePage = typeof location !== 'undefined' && location.protocol === 'https:'
+  return onSecurePage
+    ? `Sem resposta do proxy local em ${DEFAULT_PROXY_URL}. Rode “npm run proxy” na sua máquina; em páginas https o navegador também pode bloquear a chamada.`
+    : `Suba o proxy local com “npm run proxy” para usar dados reais.`
 }
 
 export function writeProxyUrl(value: string) {

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { CheckCircle2, CircleHelp, Link, RefreshCw, Save, ShieldCheck } from 'lucide-react'
 import { accounts, num, type Channel } from '../data'
 import {
+  DEFAULT_PROXY_URL,
   describeSync,
   getAutoSyncStatus,
   readProxyUrl,
@@ -37,15 +38,16 @@ export default function IntegrationsPage() {
   const configured = Boolean(proxyUrl)
 
   const saveProxy = () => {
-    writeProxyUrl(proxyUrl)
+    const typed = proxyUrl.trim()
+    writeProxyUrl(typed)
     const saved = readProxyUrl()
     setProxyUrl(saved)
     setNotice(
-      saved
-        ? `Endereço do proxy salvo: ${saved}. Sincronizando agora com esse servidor.`
-        : 'Campo limpo. Informe o endereço do proxy para sincronizar com a Amazon.',
+      saved === DEFAULT_PROXY_URL
+        ? `Proxy local padrão em uso: ${saved}. Sincronizando agora.`
+        : `Endereço do proxy salvo: ${saved}. Sincronizando agora.`,
     )
-    if (saved) void run()
+    void run()
   }
 
   const run = async () => {
@@ -121,7 +123,7 @@ export default function IntegrationsPage() {
         className="sync-run"
         action={
           <div className="sync-run-actions">
-            <Tag value={configured ? 'Proxy ativo' : 'Sem proxy'} />
+            <Tag value={autoSync.ok === false ? 'Proxy indisponível' : configured ? 'Proxy ativo' : 'Sem proxy'} />
             <button className="primary" onClick={() => void run()} disabled={running}>
               <RefreshCw size={16} className={running ? 'spin' : ''} />
               {running ? 'Sincronizando…' : 'Executar sincronização'}

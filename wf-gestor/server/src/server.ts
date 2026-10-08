@@ -6,6 +6,12 @@ import { SpApiError } from './spapi.js'
 
 const app = Fastify({ logger: true })
 
+app.addHook('onRequest', async (request, reply) => {
+  if (request.headers['access-control-request-private-network']) {
+    reply.header('access-control-allow-private-network', 'true')
+  }
+})
+
 await app.register(cors, { origin: config.corsOrigin === '*' ? true : config.corsOrigin.split(',') })
 
 app.get('/health', async () => ({ ok: true, service: 'wf-gestor-proxy' }))
@@ -116,7 +122,7 @@ app.get<{ Params: { resource: string }; Querystring: { since?: string } }>(
 )
 
 try {
-  await app.listen({ port: config.port, host: '0.0.0.0' })
+  await app.listen({ port: config.port, host: config.host })
 } catch (error) {
   app.log.error(error)
   process.exit(1)

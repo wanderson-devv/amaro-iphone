@@ -1,5 +1,10 @@
 export * from './types'
-export { AmazonSpApiConnector, readProxyUrl, writeProxyUrl } from './amazon/connector'
+export {
+  AmazonSpApiConnector,
+  DEFAULT_PROXY_URL,
+  readProxyUrl,
+  writeProxyUrl,
+} from './amazon/connector'
 export {
   getAmazonConnector,
   hydrateStates,

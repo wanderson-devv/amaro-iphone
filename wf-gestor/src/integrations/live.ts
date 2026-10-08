@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { readProxyUrl } from './amazon/connector'
+import { proxyHint, readProxyUrl } from './amazon/connector'
 
 export type LiveSale = {
   id: string
@@ -87,11 +87,7 @@ export async function fetchLiveSales(): Promise<{ sales: LiveSale[]; detail: str
   try {
     response = await fetch(`${base}/amazon/live`, { headers: { Accept: 'application/json' } })
   } catch {
-    throw new LiveError(
-      'erro',
-      'Proxy SP-API indisponível.',
-      'Suba o proxy local com “npm run proxy” e tente de novo.',
-    )
+    throw new LiveError('erro', 'Proxy SP-API indisponível.', proxyHint())
   }
 
   const body = (await response.json().catch(() => ({}))) as {
