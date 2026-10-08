@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Bell,
   Boxes,
@@ -18,6 +18,9 @@ import FinancePage from './pages/FinancePage'
 import AnalyticsPage from './pages/AnalyticsPage'
 import OperationsPage from './pages/OperationsPage'
 import IntegrationsPage from './pages/IntegrationsPage'
+import LiveToast from './components/LiveToast'
+import { brl } from './data'
+import { useLiveSales, type LiveSale, type LiveStatus } from './integrations'
 
 type View =
   | 'Visão geral'
@@ -38,8 +41,77 @@ const nav: { label: View; icon: typeof LayoutDashboard }[] = [
   { label: 'Integrações', icon: Plug },
 ]
 
+const liveLabels: Record<LiveStatus, string> = {
+  inicial: 'Conectando…',
+  live: 'Ao vivo',
+  'sem-proxy': 'Proxy off',
+  'aguardando-credenciais': 'Sem credenciais',
+  erro: 'Erro de conexão',
+}
+
+const hora = (iso: string) => {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const hoje = new Date().toDateString() === date.toDateString()
+  return hoje
+    ? date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : `${date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+}
+
 export default function App() {
   const [view, setView] = useState<View>('Visão geral')
+  const live = useLiveSales(30000)
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [toasts, setToasts] = useState<LiveSale[]>([])
+  const notified = useRef<Set<string>>(new Set())
+  const panelRef = useRef<HTMLDivElement>(null)
+  const bellRef = useRef<HTMLButtonElement>(null)
+  const acknowledgeRef = useRef(live.acknowledge)
+  acknowledgeRef.current = live.acknowledge
+
+  const goVendas = () => {
+    setView('Vendas')
+    setPanelOpen(false)
+    setToasts([])
+    live.acknowledge()
+  }
+
+  const closeToast = (id: string) => {
+    setToasts((prev) => prev.filter((sale) => sale.id !== id))
+    live.acknowledge(id)
+  }
+
+  useEffect(() => {
+    const cutoff = Date.now() - 48 * 3600000
+    const fresh = live.pending.filter(
+      (sale) => !notified.current.has(sale.id) && Date.parse(sale.purchasedAt) >= cutoff,
+    )
+    if (!fresh.length) return
+    fresh.forEach((sale) => notified.current.add(sale.id))
+    setToasts((prev) => [...fresh, ...prev].slice(0, 3))
+  }, [live.pending])
+
+  useEffect(() => {
+    if (!toasts.length) return
+    const timer = window.setTimeout(() => {
+      const oldest = toasts[toasts.length - 1]
+      setToasts((prev) => prev.filter((sale) => sale.id !== oldest.id))
+      acknowledgeRef.current(oldest.id)
+    }, 8000)
+    return () => window.clearTimeout(timer)
+  }, [toasts])
+
+  useEffect(() => {
+    if (!panelOpen) return
+    const onDoc = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      if (panelRef.current?.contains(target)) return
+      if (bellRef.current?.contains(target)) return
+      setPanelOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [panelOpen])
 
   const render = () => {
     switch (view) {
@@ -56,7 +128,12 @@ export default function App() {
       case 'Integrações':
         return <IntegrationsPage />
       default:
-        return <DashboardPage onNavigate={(next) => setView(next as View)} />
+        return (
+          <DashboardPage
+            onNavigate={(next) => setView(next as View)}
+            live={{ sales: live.sales, pending: live.pending }}
+          />
+        )
     }
   }
 
@@ -108,17 +185,88 @@ export default function App() {
             <span className="all-channels">+</span> Todos os canais <ChevronDown size={15} />
           </button>
           <div className="header-tools">
-            <button className="icon-button" aria-label="Notificações">
-              <Bell size={19} />
+            <span className={`live-chip status-${live.status}`} title={live.message}>
               <i />
+              {liveLabels[live.status]}
+            </span>
+            <button
+              ref={bellRef}
+              className={panelOpen ? 'icon-button bell-active' : 'icon-button'}
+              aria-label={
+                live.pending.length
+                  ? `Notificações: ${live.pending.length} vendas novas`
+                  : 'Notificações'
+              }
+              aria-expanded={panelOpen}
+              onClick={() => setPanelOpen((open) => !open)}
+            >
+              <Bell size={19} />
+              {live.pending.length > 0 ? (
+                <i className="bell-badge">{live.pending.length > 9 ? '9+' : live.pending.length}</i>
+              ) : (
+                <i />
+              )}
             </button>
             <span className="period">01 mai - 30 mai 2026</span>
           </div>
+          {panelOpen && (
+            <div className="live-panel" ref={panelRef}>
+              <div className="live-panel-head">
+                <div>
+                  <span className="eyebrow">Amazon SP-API</span>
+                  <h3>Vendas ao vivo</h3>
+                </div>
+                <span className={`live-chip status-${live.status}`} title={live.message}>
+                  <i />
+                  {liveLabels[live.status]}
+                </span>
+              </div>
+              <p className="live-panel-status">
+                {live.message}
+                {live.updatedAt
+                  ? ` · atualizado às ${hora(new Date(live.updatedAt).toISOString())}`
+                  : ''}
+              </p>
+              <ul>
+                {live.sales.slice(0, 8).map((sale) => (
+                  <li
+                    key={sale.id}
+                    className={live.pending.some((item) => item.id === sale.id) ? 'is-new' : ''}
+                  >
+                    <div>
+                      <b>{sale.product ?? 'Pedido na Amazon'}</b>
+                      <small>
+                        {hora(sale.purchasedAt)} · {sale.status}
+                      </small>
+                    </div>
+                    <strong>{brl(sale.amount)}</strong>
+                  </li>
+                ))}
+                {!live.sales.length && (
+                  <li className="empty">Nenhum pedido nas últimas 48 horas.</li>
+                )}
+              </ul>
+              <div className="live-panel-foot">
+                <button
+                  className="ghost"
+                  onClick={() => live.acknowledge()}
+                  disabled={!live.pending.length}
+                >
+                  Marcar como lidas
+                </button>
+                <button className="primary" onClick={goVendas}>
+                  Ver vendas
+                </button>
+              </div>
+            </div>
+          )}
         </header>
         <div className="page" key={view}>
           {render()}
         </div>
       </section>
+
+      <LiveToast sales={toasts} onOpen={goVendas} onClose={closeToast} />
     </main>
   )
 }

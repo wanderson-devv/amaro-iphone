@@ -1,7 +1,7 @@
 import cors from '@fastify/cors'
 import Fastify from 'fastify'
 import { config, isConfigured, missingKeys } from './config.js'
-import { handlers, resourceKeys } from './resources.js'
+import { fetchLive, handlers, resourceKeys } from './resources.js'
 import { SpApiError } from './spapi.js'
 
 const app = Fastify({ logger: true })
@@ -20,6 +20,33 @@ app.get('/amazon/health', async () => {
     detail: configured
       ? `proxy SP-API pronto para a loja ${config.marketplaceId}`
       : `credenciais ausentes: ${missingKeys().join(', ')}`,
+  }
+})
+
+app.get<{ Querystring: { since?: string } }>('/amazon/live', async (request, reply) => {
+  if (!isConfigured()) {
+    return reply.code(503).send({
+      ok: false,
+      error: 'Proxy sem credenciais da Amazon.',
+      detail: `Preencha no .env: ${missingKeys().join(', ')}`,
+    })
+  }
+
+  const querySince = request.query.since
+  const bucket = Math.floor((Date.now() - 48 * 3600000) / 30000) * 30000
+  const since =
+    querySince && !Number.isNaN(Date.parse(querySince))
+      ? querySince
+      : new Date(bucket).toISOString()
+
+  try {
+    const result = await fetchLive(since)
+    return { ok: true, resource: 'live', since, ...result }
+  } catch (error) {
+    if (error instanceof SpApiError) {
+      return reply.code(502).send({ ok: false, error: error.message, detail: error.detail })
+    }
+    throw error
   }
 })
 

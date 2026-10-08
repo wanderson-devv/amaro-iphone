@@ -48,6 +48,20 @@ export async function getAccessToken(): Promise<string> {
 
 const amzDate = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')
 
+const MIN_INTERVAL_MS = 1100
+let gate: Promise<unknown> = Promise.resolve()
+let lastRequestAt = 0
+
+function acquireSlot(): Promise<void> {
+  const next = gate.then(async () => {
+    const wait = MIN_INTERVAL_MS - (Date.now() - lastRequestAt)
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait))
+    lastRequestAt = Date.now()
+  })
+  gate = next.catch(() => undefined)
+  return next
+}
+
 export async function spGet(path: string, params: Record<string, string | undefined> = {}) {
   const url = new URL(path, `${endpoints[config.region]}/`)
   for (const [key, value] of Object.entries(params)) {
@@ -55,19 +69,33 @@ export async function spGet(path: string, params: Record<string, string | undefi
   }
 
   const token = await getAccessToken()
+  const headers = {
+    'x-amz-access-token': token,
+    'x-amz-date': amzDate(),
+    'user-agent': 'WFGestor/1.0 (Language=TypeScript; Platform=node)',
+    accept: 'application/json',
+  }
 
-  const response = await fetch(url, {
-    headers: {
-      'x-amz-access-token': token,
-      'x-amz-date': amzDate(),
-      'user-agent': 'WFGestor/1.0 (Language=TypeScript; Platform=node)',
-      accept: 'application/json',
-    },
-  })
+  let text = ''
+  let status = 0
 
-  const text = await response.text()
-  if (!response.ok) {
-    throw new SpApiError(`A Amazon respondeu HTTP ${response.status} em ${path}.`, explain(text))
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, status === 429 ? 1400 : 700))
+      headers['x-amz-date'] = amzDate()
+    }
+
+    await acquireSlot()
+    const response = await fetch(url, { headers })
+    text = await response.text()
+    status = response.status
+
+    const retryable = status === 429 || (status >= 500 && status <= 599)
+    if (!retryable) break
+  }
+
+  if (!status || status < 200 || status >= 300) {
+    throw new SpApiError(`A Amazon respondeu HTTP ${status} em ${path}.`, explain(text))
   }
 
   return text ? (JSON.parse(text) as Record<string, unknown>) : {}

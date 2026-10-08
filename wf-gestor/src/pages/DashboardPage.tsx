@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { brl, brlShort, dateBR, num, pct, priorities, sales, type SaleStatus } from '../data'
 import { PageHeader, Panel, StatTile } from '../components/ui'
+import type { LiveFeed } from '../integrations'
 
 const HOJE = '2026-05-30'
 
@@ -60,7 +61,13 @@ function areaPath(points: Pt[], height: number) {
   return `${linePath(points)} L${last.x.toFixed(1)} ${height} L${first.x.toFixed(1)} ${height} Z`
 }
 
-export default function DashboardPage({ onNavigate }: { onNavigate: (view: string) => void }) {
+export default function DashboardPage({
+  onNavigate,
+  live,
+}: {
+  onNavigate: (view: string) => void
+  live?: LiveFeed
+}) {
   const [query, setQuery] = useState('')
   const [presetLabel, setPresetLabel] = useState(presets[2].label)
   const [custom, setCustom] = useState<Range | null>(null)
@@ -165,6 +172,16 @@ export default function DashboardPage({ onNavigate }: { onNavigate: (view: strin
   const visibleSales = filtered
     .filter((sale) => `${sale.id} ${sale.product} ${sale.channel}`.toLowerCase().includes(query.toLowerCase()))
     .slice(0, 6)
+
+  const knownIds = new Set(sales.map((sale) => sale.id))
+  const livePendingIds = new Set((live?.pending ?? []).map((sale) => sale.id))
+  const liveRows = (live?.sales ?? [])
+    .filter(
+      (sale) =>
+        !knownIds.has(sale.id) &&
+        `${sale.id} ${sale.product ?? ''}`.toLowerCase().includes(query.toLowerCase()),
+    )
+    .slice(0, 3)
 
   const kpis: { label: string; value: string; hint: string; tone?: 'positive' | 'attention'; info?: string }[] = [
     { label: 'Faturamento', value: brl(kpi.faturamento), hint: 'vendas brutas aprovadas', info: 'Soma dos valores de venda antes de taxas, impostos e custos.' },
@@ -398,6 +415,30 @@ export default function DashboardPage({ onNavigate }: { onNavigate: (view: strin
               </tr>
             </thead>
             <tbody>
+              {liveRows.map((sale) => (
+                <tr
+                  key={sale.id}
+                  className={livePendingIds.has(sale.id) ? 'clickable row-new' : 'clickable'}
+                  onClick={() => onNavigate('Vendas')}
+                >
+                  <td className="order">{sale.id}</td>
+                  <td>
+                    <b>{sale.product ?? 'Pedido na Amazon'}</b>
+                    <span className="live-flag">
+                      <i /> Ao vivo
+                    </span>
+                  </td>
+                  <td>
+                    <span className="channel">Amazon</span>
+                  </td>
+                  <td>{brl(sale.amount)}</td>
+                  <td className="profit">—</td>
+                  <td>—</td>
+                  <td>
+                    <span className="tag tag-info">{sale.status}</span>
+                  </td>
+                </tr>
+              ))}
               {visibleSales.map((sale) => (
                 <tr key={sale.id} className="clickable" onClick={() => onNavigate('Vendas')}>
                   <td className="order">{sale.id}</td>
