@@ -625,7 +625,7 @@ async function readOrderItems(orderId: string): Promise<DetailedItem[] | null> {
   if (cached) return cached
 
   try {
-    const response = (await spGet(`/orders/v0/orders/${orderId}/order-items`)) as SpPayload<{
+    const response = (await spGet(`/orders/v0/orders/${orderId}/orderItems`)) as SpPayload<{
       OrderItems?: {
         Title?: string
         SellerSKU?: string
