@@ -1,11 +1,12 @@
 import { brl, num, pct } from '../data'
-import { FINANCE_SINCE, useAmazonFinance, useAmazonSkus, useAppDbWriteError } from '../integrations'
+import { FINANCE_SINCE, useAmazonFinance, useAmazonSkus, useAppDb, useAppDbWriteError } from '../integrations'
 import { PageHeader, Panel, StatTile, Tag } from '../components/ui'
 
 export default function CatalogPage() {
   const finance = useAmazonFinance(FINANCE_SINCE)
   const { skus: skuMeta, save } = useAmazonSkus()
   const dbError = useAppDbWriteError()
+  const db = useAppDb()
 
   const amazonSkus = finance.skus
   const totalUnits = amazonSkus.reduce((sum, item) => sum + item.units, 0)
@@ -98,8 +99,8 @@ export default function CatalogPage() {
           </div>
         )}
         <p className="breakdown-note">
-          Nome e custo ficam salvos no banco do proxy (SQLite no servidor) e alimentam Lucro e Margem em todas as
-          telas — de qualquer dispositivo.
+          Nome e custo ficam salvos no banco {db.backend === 'neon' ? 'Neon (Postgres na nuvem)' : 'local do proxy (SQLite)'}{' '}
+          e alimentam Lucro e Margem em todas as telas — de qualquer dispositivo.
         </p>
         {dbError && (
           <p className="breakdown-note is-error">

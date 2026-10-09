@@ -8,11 +8,13 @@ export type AppDbState = {
   snapshot: Record<string, number> | null
   lastSync: string | null
   autoSync: boolean
+  backend: 'neon' | 'sqlite'
 }
 
 type DbStateResponse = {
   ok?: boolean
   error?: string
+  backend?: string
   skus?: { sku: string; name?: string; cost?: number }[]
   snapshot?: Record<string, number> | null
   lastSync?: string | null
@@ -24,7 +26,7 @@ const LEGACY_SNAPSHOT = 'wf.amazon.sync'
 const LEGACY_LAST_SYNC = 'wf.lastSync.Amazon'
 const LEGACY_AUTOSYNC = 'wf.autoSync'
 
-let state: AppDbState = { skus: {}, snapshot: null, lastSync: null, autoSync: true }
+let state: AppDbState = { skus: {}, snapshot: null, lastSync: null, autoSync: true, backend: 'sqlite' }
 let writeError: string | null = null
 let loaded = false
 let migrating = false
@@ -72,6 +74,7 @@ function apply(body: DbStateResponse) {
     snapshot: body.snapshot ?? null,
     lastSync: body.lastSync ?? null,
     autoSync: body.autoSync ?? true,
+    backend: body.backend === 'neon' ? 'neon' : 'sqlite',
   }
   emit()
 }

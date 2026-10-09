@@ -1,15 +1,31 @@
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import pg from 'pg'
 import { DatabaseSync } from 'node:sqlite'
+import { config } from './config.js'
+
+export type Backend = 'neon' | 'sqlite'
+export type SkuRecord = { sku: string; name?: string; cost?: number }
+
+export const STATE = {
+  snapshot: 'sync.snapshot',
+  lastSync: 'sync.last',
+  autoSync: 'settings.autoSync',
+} as const
+
+const neonUrl = config.neonDatabaseUrl.trim()
+export const backend: Backend = neonUrl ? 'neon' : 'sqlite'
+
+const pool = neonUrl ? new pg.Pool({ connectionString: neonUrl, max: 4, ssl: { rejectUnauthorized: false } }) : null
 
 const here = dirname(fileURLToPath(import.meta.url))
 const dataDir = resolve(here, '../data')
 mkdirSync(dataDir, { recursive: true })
 
-const db = new DatabaseSync(resolve(dataDir, 'wf-gestor.db'))
+const sqlite = new DatabaseSync(resolve(dataDir, 'wf-gestor.db'))
 
-db.exec(`
+sqlite.exec(`
   CREATE TABLE IF NOT EXISTS sku_meta (
     sku TEXT PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '',
@@ -23,16 +39,70 @@ db.exec(`
   );
 `)
 
-export type SkuRecord = { sku: string; name?: string; cost?: number }
+let neonReady: Promise<void> | null = null
 
-export const STATE = {
-  snapshot: 'sync.snapshot',
-  lastSync: 'sync.last',
-  autoSync: 'settings.autoSync',
-} as const
+async function promoteSqliteToNeon() {
+  if (!pool) return
+  const skuRows = sqlite.prepare('SELECT sku, name, cost FROM sku_meta').all() as {
+    sku: string
+    name: string
+    cost: number | null
+  }[]
+  const stateRows = sqlite.prepare('SELECT key, value FROM app_state').all() as { key: string; value: string }[]
+  for (const row of skuRows) {
+    await pool.query(
+      `INSERT INTO sku_meta (sku, name, cost, updated_at) VALUES ($1, $2, $3, now())
+       ON CONFLICT (sku) DO NOTHING`,
+      [row.sku, row.name || '', row.cost ?? null],
+    )
+  }
+  for (const row of stateRows) {
+    await pool.query(
+      `INSERT INTO app_state (key, value, updated_at) VALUES ($1, $2, now())
+       ON CONFLICT (key) DO NOTHING`,
+      [row.key, row.value],
+    )
+  }
+  sqlite.exec('DELETE FROM sku_meta; DELETE FROM app_state;')
+}
 
-export function listSkus(): SkuRecord[] {
-  const rows = db.prepare('SELECT sku, name, cost FROM sku_meta ORDER BY sku').all() as {
+function ensureNeon(): Promise<void> {
+  if (!pool) return Promise.reject(new Error('Neon não configurado.'))
+  if (!neonReady) {
+    neonReady = pool
+      .query(`
+        CREATE TABLE IF NOT EXISTS sku_meta (
+          sku text PRIMARY KEY,
+          name text NOT NULL DEFAULT '',
+          cost double precision,
+          updated_at timestamptz NOT NULL DEFAULT now()
+        );
+        CREATE TABLE IF NOT EXISTS app_state (
+          key text PRIMARY KEY,
+          value text NOT NULL,
+          updated_at timestamptz NOT NULL DEFAULT now()
+        );
+      `)
+      .then(() => promoteSqliteToNeon())
+      .catch((error) => {
+        neonReady = null
+        throw error
+      })
+  }
+  return neonReady
+}
+
+export async function listSkus(): Promise<SkuRecord[]> {
+  if (pool) {
+    await ensureNeon()
+    const { rows } = await pool.query('SELECT sku, name, cost FROM sku_meta ORDER BY sku')
+    return (rows as { sku: string; name: string; cost: number | null }[]).map((row) => ({
+      sku: row.sku,
+      name: row.name || undefined,
+      cost: row.cost ?? undefined,
+    }))
+  }
+  const rows = sqlite.prepare('SELECT sku, name, cost FROM sku_meta ORDER BY sku').all() as {
     sku: string
     name: string
     cost: number | null
@@ -44,15 +114,40 @@ export function listSkus(): SkuRecord[] {
   }))
 }
 
-export function replaceSku(sku: string, name: string | undefined, cost: number | null) {
-  db.prepare(
-    `INSERT INTO sku_meta (sku, name, cost, updated_at) VALUES (?, ?, ?, ?)
-     ON CONFLICT(sku) DO UPDATE SET name = excluded.name, cost = excluded.cost, updated_at = excluded.updated_at`,
-  ).run(sku, name ?? '', cost, new Date().toISOString())
+export async function replaceSku(sku: string, name: string | undefined, cost: number | null) {
+  if (pool) {
+    await ensureNeon()
+    await pool.query(
+      `INSERT INTO sku_meta (sku, name, cost, updated_at) VALUES ($1, $2, $3, now())
+       ON CONFLICT (sku) DO UPDATE SET name = EXCLUDED.name, cost = EXCLUDED.cost, updated_at = EXCLUDED.updated_at`,
+      [sku, name ?? '', cost],
+    )
+    return
+  }
+  sqlite
+    .prepare(
+      `INSERT INTO sku_meta (sku, name, cost, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(sku) DO UPDATE SET name = excluded.name, cost = excluded.cost, updated_at = excluded.updated_at`,
+    )
+    .run(sku, name ?? '', cost, new Date().toISOString())
 }
 
-export function importSkus(items: { sku: string; name?: string; cost?: number }[]) {
-  const stmt = db.prepare(
+export async function importSkus(items: { sku: string; name?: string; cost?: number }[]) {
+  if (pool) {
+    await ensureNeon()
+    let inserted = 0
+    for (const item of items) {
+      if (!item?.sku) continue
+      const info = await pool.query(
+        `INSERT INTO sku_meta (sku, name, cost, updated_at) VALUES ($1, $2, $3, now())
+         ON CONFLICT (sku) DO NOTHING`,
+        [item.sku, item.name ?? '', item.cost ?? null],
+      )
+      inserted += info.rowCount ?? 0
+    }
+    return inserted
+  }
+  const stmt = sqlite.prepare(
     `INSERT INTO sku_meta (sku, name, cost, updated_at) VALUES (?, ?, ?, ?)
      ON CONFLICT(sku) DO NOTHING`,
   )
@@ -66,13 +161,18 @@ export function importSkus(items: { sku: string; name?: string; cost?: number }[
   return inserted
 }
 
-export function readState(key: string): string | null {
-  const row = db.prepare('SELECT value FROM app_state WHERE key = ?').get(key) as { value: string } | undefined
+export async function readState(key: string): Promise<string | null> {
+  if (pool) {
+    await ensureNeon()
+    const { rows } = await pool.query('SELECT value FROM app_state WHERE key = $1', [key])
+    return (rows[0] as { value: string } | undefined)?.value ?? null
+  }
+  const row = sqlite.prepare('SELECT value FROM app_state WHERE key = ?').get(key) as { value: string } | undefined
   return row?.value ?? null
 }
 
-export function readStateJson<T>(key: string): T | null {
-  const raw = readState(key)
+export async function readStateJson<T>(key: string): Promise<T | null> {
+  const raw = await readState(key)
   if (raw === null) return null
   try {
     return JSON.parse(raw) as T
@@ -81,21 +181,46 @@ export function readStateJson<T>(key: string): T | null {
   }
 }
 
-export function readBoolState(key: string, fallback: boolean): boolean {
-  const raw = readState(key)
+export async function readBoolState(key: string, fallback: boolean): Promise<boolean> {
+  const raw = await readState(key)
   if (raw === null) return fallback
   return raw === '1'
 }
 
-export function writeState(key: string, value: string) {
-  db.prepare(
-    `INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-  ).run(key, value, new Date().toISOString())
+export async function writeState(key: string, value: string) {
+  if (pool) {
+    await ensureNeon()
+    await pool.query(
+      `INSERT INTO app_state (key, value, updated_at) VALUES ($1, $2, now())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+      [key, value],
+    )
+    return
+  }
+  sqlite
+    .prepare(
+      `INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    )
+    .run(key, value, new Date().toISOString())
 }
 
-export function importState(entries: Record<string, string>) {
-  const stmt = db.prepare(
+export async function importState(entries: Record<string, string>) {
+  if (pool) {
+    await ensureNeon()
+    let inserted = 0
+    for (const [key, value] of Object.entries(entries)) {
+      if (!key) continue
+      const info = await pool.query(
+        `INSERT INTO app_state (key, value, updated_at) VALUES ($1, $2, now())
+         ON CONFLICT (key) DO NOTHING`,
+        [key, value],
+      )
+      inserted += info.rowCount ?? 0
+    }
+    return inserted
+  }
+  const stmt = sqlite.prepare(
     `INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, ?)
      ON CONFLICT(key) DO NOTHING`,
   )

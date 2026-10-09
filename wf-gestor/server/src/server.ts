@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { config, isConfigured, missingKeys } from './config.js'
 import {
   STATE,
+  backend,
   importSkus,
   importState,
   listSkus,
@@ -41,10 +42,11 @@ app.get('/health', async () => ({ ok: true, service: 'wf-gestor-proxy' }))
 
 app.get('/db/state', async () => ({
   ok: true,
-  skus: listSkus(),
-  snapshot: readStateJson<Record<string, number>>(STATE.snapshot),
-  lastSync: readState(STATE.lastSync),
-  autoSync: readBoolState(STATE.autoSync, true),
+  backend,
+  skus: await listSkus(),
+  snapshot: await readStateJson<Record<string, number>>(STATE.snapshot),
+  lastSync: await readState(STATE.lastSync),
+  autoSync: await readBoolState(STATE.autoSync, true),
 }))
 
 app.put<{ Params: { sku: string }; Body: { name?: string | null; cost?: number | null } }>(
@@ -55,7 +57,7 @@ app.put<{ Params: { sku: string }; Body: { name?: string | null; cost?: number |
     const body = request.body ?? {}
     const name = typeof body.name === 'string' ? body.name.trim() : ''
     const cost = typeof body.cost === 'number' && Number.isFinite(body.cost) ? body.cost : null
-    replaceSku(sku, name, cost)
+    await replaceSku(sku, name, cost)
     return { ok: true, sku }
   },
 )
@@ -65,13 +67,13 @@ app.put<{
 }>('/db/state', async (request) => {
   const body = request.body ?? {}
   if (body.snapshot !== undefined) {
-    writeState(STATE.snapshot, JSON.stringify(body.snapshot ?? null))
+    await writeState(STATE.snapshot, JSON.stringify(body.snapshot ?? null))
   }
   if (body.lastSync !== undefined) {
-    writeState(STATE.lastSync, body.lastSync ?? '')
+    await writeState(STATE.lastSync, body.lastSync ?? '')
   }
   if (body.autoSync !== undefined) {
-    writeState(STATE.autoSync, body.autoSync ? '1' : '0')
+    await writeState(STATE.autoSync, body.autoSync ? '1' : '0')
   }
   return { ok: true }
 })
@@ -82,7 +84,7 @@ app.post<{ Body: { skus?: { sku: string; name?: string; cost?: number }[]; state
     const body = request.body ?? {}
     const skus = Array.isArray(body.skus) ? body.skus : []
     const state = body.state && typeof body.state === 'object' && !Array.isArray(body.state) ? body.state : {}
-    return { ok: true, insertedSkus: importSkus(skus), insertedState: importState(state) }
+    return { ok: true, insertedSkus: await importSkus(skus), insertedState: await importState(state) }
   },
 )
 

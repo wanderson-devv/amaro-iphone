@@ -34,6 +34,7 @@ export const config = {
   port: Number(process.env.PORT ?? 8787),
   host: process.env.HOST ?? '127.0.0.1',
   corsOrigin: process.env.CORS_ORIGIN ?? '*',
+  neonDatabaseUrl: process.env.NEON_DATABASE_URL ?? '',
 }
 
 export const isConfigured = () =>
