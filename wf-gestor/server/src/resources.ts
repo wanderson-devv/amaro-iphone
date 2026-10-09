@@ -90,6 +90,11 @@ async function fetchInventory(since: string): Promise<ResourceResult> {
   }
 }
 
+type ListingsItem = {
+  sku?: string
+  summaries?: { asin?: string; itemName?: string; status?: string[] }[]
+}
+
 async function fetchListings(): Promise<ResourceResult> {
   if (!config.sellerId) {
     throw new SpApiError(
@@ -99,16 +104,38 @@ async function fetchListings(): Promise<ResourceResult> {
   }
 
   try {
-    const response = (await spGet('/listings/2021-08-01/items', {
+    const response = (await spGet(`/listings/2021-08-01/items/${config.sellerId}`, {
       marketplaceIds: config.marketplaceId,
-      sellerId: config.sellerId,
-      includedData: 'identifiers',
-      locale: 'pt_BR',
-    })) as SpPayload<{ items?: unknown[] }>
+      issueLocale: 'pt_BR',
+    })) as SpPayload<{ items?: ListingsItem[] }>
 
-    const payload = unwrap<{ items?: unknown[] }>(response)
-    const count = (payload.items ?? []).length
-    return { count, detail: count ? 'anúncios ativos na loja' : 'nenhum anúncio retornado' }
+    const payload = unwrap<{ items?: ListingsItem[] }>(response)
+    const items = payload.items ?? []
+
+    listingCatalog.clear()
+    let active = 0
+
+    for (const item of items) {
+      const summary = item.summaries?.[0]
+      const sku = item.sku ?? ''
+      if (sku) {
+        listingCatalog.set(sku, {
+          title: summary?.itemName || undefined,
+          asin: summary?.asin || undefined,
+        })
+      }
+      const status = summary?.status ?? []
+      if (!status.length || status.includes('BUYABLE') || status.includes('DISCOVERABLE')) {
+        active += 1
+      }
+    }
+
+    return {
+      count: active,
+      detail: items.length
+        ? `${active} anúncios ativos na loja · tempo real`
+        : 'nenhum anúncio retornado',
+    }
   } catch (error) {
     if (!is403(error)) throw error
     return listingsFromReport()
@@ -682,7 +709,7 @@ const orderIndexKey = () => new Date(Date.now() - ORDER_INDEX_DAYS * 86400000).t
 async function ensureCatalog(): Promise<boolean> {
   if (listingCatalog.size > 0) return true
   try {
-    await listingsFromReport()
+    await fetchListings()
     return listingCatalog.size > 0
   } catch {
     return false
