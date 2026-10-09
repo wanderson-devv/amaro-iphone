@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Sale } from '../data'
 import { proxyHint, readProxyUrl } from './amazon/connector'
 import { ALL_ORDERS_SINCE } from './amazonSales'
+import { saveSkuInfo, useAppDb } from './appDb'
 
 export type FinanceOrder = {
   skus: string[]
@@ -40,41 +41,18 @@ class FinanceError extends Error {
   }
 }
 
-const SKU_KEY = 'wf.amazonSkus'
-
 const dayIso = (offsetDays: number) => new Date(Date.now() + offsetDays * 86400000).toISOString().slice(0, 10)
 
 export const FINANCE_SINCE = dayIso(-179)
 
-export function readAmazonSkus(): Record<string, AmazonSkuInfo> {
-  try {
-    const raw = localStorage.getItem(SKU_KEY)
-    const parsed: unknown = raw ? JSON.parse(raw) : {}
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, AmazonSkuInfo>) : {}
-  } catch {
-    return {}
-  }
-}
-
-export function writeAmazonSku(sku: string, info: AmazonSkuInfo) {
-  const current = readAmazonSkus()
-  current[sku] = info
-  try {
-    localStorage.setItem(SKU_KEY, JSON.stringify(current))
-  } catch {
-    /* armazenamento indisponível */
-  }
-}
-
 export function useAmazonSkus() {
-  const [skus, setSkus] = useState<Record<string, AmazonSkuInfo>>(() => readAmazonSkus())
+  const db = useAppDb()
 
   const save = useCallback((sku: string, info: AmazonSkuInfo) => {
-    writeAmazonSku(sku, info)
-    setSkus(readAmazonSkus())
+    void saveSkuInfo(sku, info)
   }, [])
 
-  return { skus, save }
+  return { skus: db.skus, save }
 }
 
 export async function fetchAmazonFinance(

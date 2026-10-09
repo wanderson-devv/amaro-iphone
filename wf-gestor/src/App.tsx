@@ -22,6 +22,7 @@ import LiveToast from './components/LiveToast'
 import { brl } from './data'
 import {
   describeSync,
+  loadAppDb,
   startAutoSync,
   useAutoSyncStatus,
   useLiveSales,
@@ -124,7 +125,7 @@ export default function App() {
   }, [panelOpen])
 
   useEffect(() => {
-    startAutoSync()
+    void loadAppDb().finally(() => startAutoSync())
   }, [])
 
   const syncTone = sync.running

@@ -1,8 +1,8 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
+import { getAppDb, saveAppState } from './appDb'
 import { hydrateStates, readLastSync, runAmazonSync } from './sync'
 import type { SyncState } from './types'
 
-const ENABLED_KEY = 'wf.autoSync'
 const INTERVAL_MS = 5 * 60_000
 const BOOT_DELAY_MS = 2_000
 
@@ -19,12 +19,7 @@ export type AutoSyncStatus = {
 }
 
 function readEnabled(): boolean {
-  try {
-    const raw = localStorage.getItem(ENABLED_KEY)
-    return raw === null ? true : raw === '1'
-  } catch {
-    return true
-  }
+  return getAppDb().autoSync
 }
 
 let status: AutoSyncStatus = {
@@ -63,11 +58,7 @@ export function useAutoSyncStatus(): AutoSyncStatus {
 }
 
 export function setAutoSyncEnabled(enabled: boolean) {
-  try {
-    localStorage.setItem(ENABLED_KEY, enabled ? '1' : '0')
-  } catch {
-    /* armazenamento indisponível */
-  }
+  void saveAppState({ autoSync: enabled })
   emit({ enabled })
   if (enabled) void runSyncNow()
 }
@@ -105,6 +96,8 @@ let started = false
 export function startAutoSync() {
   if (started) return
   started = true
+
+  emit({ enabled: readEnabled(), lastSync: readLastSync(), states: hydrateStates() })
 
   window.setTimeout(() => {
     if (readEnabled()) void runSyncNow()

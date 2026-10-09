@@ -1,9 +1,7 @@
 import { AmazonSpApiConnector } from './amazon/connector'
+import { getAppDb, saveAppState } from './appDb'
 import type { ChannelConnector, SyncState } from './types'
 import { SyncError, syncResources } from './types'
-
-const LAST_SYNC_KEY = 'wf.lastSync.Amazon'
-const SNAPSHOT_KEY = 'wf.amazon.sync'
 
 const since30d = () => new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
 
@@ -15,34 +13,12 @@ export function idleStates(): SyncState[] {
   return syncResources.map((item) => ({ resource: item.key, status: 'aguardando', count: 0 }))
 }
 
-function read(key: string): string | null {
-  try {
-    return localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-
-function write(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value)
-  } catch {
-    /* armazenamento indisponível */
-  }
-}
-
 export function readLastSync(): string | null {
-  return read(LAST_SYNC_KEY)
+  return getAppDb().lastSync
 }
 
 export function readSyncSnapshot(): Record<string, number> | null {
-  const raw = read(SNAPSHOT_KEY)
-  if (!raw) return null
-  try {
-    return JSON.parse(raw) as Record<string, number>
-  } catch {
-    return null
-  }
+  return getAppDb().snapshot
 }
 
 export function hydrateStates(): SyncState[] {
@@ -110,11 +86,10 @@ export async function runAmazonSync(onUpdate: (states: SyncState[]) => void): Pr
   const stamp = new Date().toLocaleString('pt-BR')
 
   if (okStates.length) {
-    write(LAST_SYNC_KEY, stamp)
-    write(
-      SNAPSHOT_KEY,
-      JSON.stringify(Object.fromEntries(okStates.map((item) => [item.resource, item.count]))),
-    )
+    await saveAppState({
+      lastSync: stamp,
+      snapshot: Object.fromEntries(okStates.map((item) => [item.resource, item.count])),
+    })
   }
 
   const total = okStates.reduce((sum, item) => sum + item.count, 0)
