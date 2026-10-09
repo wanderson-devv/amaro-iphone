@@ -10,7 +10,7 @@ import {
   PackageSearch,
   ReceiptText,
 } from 'lucide-react'
-import { brl, brlShort, dateBR, num, pct, priorities, sales as demoSales, type Sale, type SaleStatus } from '../data'
+import { brl, brlShort, dateBR, num, pct, type Sale, type SaleStatus } from '../data'
 import { PageHeader, Panel, StatTile } from '../components/ui'
 import {
   ALL_ORDERS_SINCE,
@@ -24,7 +24,6 @@ import {
   type LiveFeed,
 } from '../integrations'
 
-const DEMO_HOJE = '2026-05-30'
 const HOJE = new Date().toISOString().slice(0, 10)
 
 type Range = { start: string; end: string }
@@ -63,7 +62,7 @@ const PRESET_DEFAULT = 'Últimos 30 dias'
 const fullBR = (iso: string) =>
   new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 
-const canais = ['Todas', 'Amazon', 'Mercado Livre', 'Shopee', 'TikTok Shop']
+const canais = ['Todas', 'Amazon']
 const situacoes: ('Todos' | SaleStatus)[] = ['Todos', 'Recebido', 'A liberar', 'Em disputa', 'Devolvido']
 
 type Pt = { x: number; y: number }
@@ -97,16 +96,15 @@ export default function DashboardPage({
   const syncStatus = useAutoSyncStatus()
   const amazon = useAmazonSales(ALL_ORDERS_SINCE)
   const skuMeta = useAmazonSkus()
-  const usingReal = amazon.status === 'live' || (amazon.status !== 'inicial' && amazon.sales.length > 0)
   const onSecurePage = typeof window !== 'undefined' && window.location.protocol === 'https:'
-  const base = usingReal ? HOJE : DEMO_HOJE
+  const base = HOJE
   const periodPresets = useMemo(() => buildPresets(base), [base])
 
   const [query, setQuery] = useState('')
   const [presetLabel, setPresetLabel] = useState(PRESET_DEFAULT)
   const [custom, setCustom] = useState<Range | null>(null)
   const [open, setOpen] = useState(false)
-  const [draft, setDraft] = useState<Range>({ start: shiftDay(DEMO_HOJE, -2), end: DEMO_HOJE })
+  const [draft, setDraft] = useState<Range>({ start: shiftDay(HOJE, -2), end: HOJE })
   const [canal, setCanal] = useState(canais[0])
   const [situacao, setSituacao] = useState<'Todos' | SaleStatus>('Todos')
   const pickerRef = useRef<HTMLDivElement>(null)
@@ -133,7 +131,7 @@ export default function DashboardPage({
 
   const periodo: Range = custom ?? periodPresets.find((item) => item.label === presetLabel)!.range
   const triggerLabel = custom ? `${fullBR(custom.start)} — ${fullBR(custom.end)}` : presetLabel
-  const finance = useAmazonFinance(usingReal ? periodo.start : shiftDay(HOJE, -29))
+  const finance = useAmazonFinance(periodo.start)
 
   const refreshFinance = finance.refresh
   useEffect(() => {
@@ -156,7 +154,7 @@ export default function DashboardPage({
     setOpen(false)
   }
 
-  const source = usingReal ? enrichSales(amazon.sales, finance.orders, skuMeta.skus) : demoSales
+  const source = enrichSales(amazon.sales, finance.orders, skuMeta.skus)
 
   const filtered = useMemo(() => {
     return source.filter((sale) => {
@@ -167,21 +165,19 @@ export default function DashboardPage({
     })
   }, [source, periodo, canal, situacao])
 
-  const adsInPeriod = usingReal
-    ? finance.ads
-        .filter((item) => item.date >= periodo.start && item.date <= periodo.end)
-        .reduce((sum, item) => sum + item.amount, 0)
-    : 0
+  const adsInPeriod = finance.ads
+    .filter((item) => item.date >= periodo.start && item.date <= periodo.end)
+    .reduce((sum, item) => sum + item.amount, 0)
 
-  const rows = usingReal ? allocateAds(filtered, adsInPeriod) : filtered
+  const rows = allocateAds(filtered, adsInPeriod)
 
   const knownRows = rows.filter((sale) => sale.partial === false)
-  const hasNet = usingReal ? knownRows.length > 0 : true
-  const hasCost = usingReal ? knownRows.length > 0 && knownRows.every((sale) => !sale.costUnknown) : true
-  const hasAds = usingReal ? finance.status === 'live' && adsInPeriod > 0 : true
+  const hasNet = knownRows.length > 0
+  const hasCost = knownRows.length > 0 && knownRows.every((sale) => !sale.costUnknown)
+  const hasAds = finance.status === 'live' && adsInPeriod > 0
   const hasProfit = hasNet && hasCost
   const coverage = rows.length ? knownRows.length / rows.length : 1
-  const adsTotal = usingReal ? adsInPeriod : filtered.reduce((sum, sale) => sum + sale.ads, 0)
+  const adsTotal = adsInPeriod
 
   const kpi = useMemo(() => {
     const acc = rows.reduce(
@@ -258,6 +254,38 @@ export default function DashboardPage({
         .filter((sale) => sale.gross > 0 && sale.partial === false)
         .reduce<Sale | null>((worst, sale) => (worst && worst.margin <= sale.margin ? worst : sale), null)
     : null
+
+  type Action = { title: string; detail: string; count: string; tone: string; view: string }
+  const semExtrato = rows.filter((sale) => sale.partial !== false).length
+  const semCusto = knownRows.filter((sale) => sale.costUnknown).length
+  const actions: Action[] = []
+  if (semExtrato) {
+    actions.push({
+      title: `${semExtrato} pedido${semExtrato > 1 ? 's' : ''} sem extrato`,
+      detail: 'Comissões e taxas ainda não publicadas',
+      count: `${semExtrato} pedidos`,
+      tone: 'blue',
+      view: 'Financeiro',
+    })
+  }
+  if (semCusto) {
+    actions.push({
+      title: `${semCusto} pedido${semCusto > 1 ? 's' : ''} sem custo`,
+      detail: 'Informe o custo do SKU em Catálogo para ver a margem',
+      count: `${semCusto} itens`,
+      tone: 'sky',
+      view: 'Catálogo',
+    })
+  }
+  if (!actions.length && rows.length) {
+    actions.push({
+      title: 'Tudo conciliado no recorte',
+      detail: 'Sem pendências de extrato ou custo',
+      count: `${rows.length} pedidos`,
+      tone: 'ice',
+      view: 'Vendas',
+    })
+  }
 
   const width = 900
   const height = 260
@@ -343,9 +371,9 @@ export default function DashboardPage({
         )}
         {amazon.status !== 'inicial' && amazon.status !== 'live' && (
           <>
-            <b>{usingReal ? 'Dados reais da última leitura.' : 'Modo demonstração.'}</b> {amazon.message}
+            <b>Sem dados no momento.</b> {amazon.message}
             {amazon.hint ? ` · ${amazon.hint}` : ''}
-            {!usingReal && onSecurePage && (
+            {onSecurePage && (
               <>
                 {' '}
                 <a href={DEFAULT_PROXY_URL}>abrir o app local</a>
@@ -494,9 +522,9 @@ export default function DashboardPage({
           )}
           <span className="synced">
             {daily.length} dias ·{' '}
-            {usingReal
+            {amazon.updatedAt
               ? `atualizado ${new Date(amazon.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
-              : 'base de demonstração'}
+              : 'sem leitura ainda'}
           </span>
         </div>
       </Panel>
@@ -504,7 +532,7 @@ export default function DashboardPage({
       <section className="two-col">
         <Panel title="Próximas ações" hint="Atenção requerida" className="focus-panel">
           <div className="action-list">
-            {priorities.map((item, index) => (
+            {actions.map((item, index) => (
               <div key={item.title}>
                 <span className={`action-icon ${item.tone}`}>
                   {index === 0 ? <ReceiptText size={18} /> : index === 1 ? <PackageSearch size={18} /> : <Boxes size={18} />}
@@ -513,11 +541,10 @@ export default function DashboardPage({
                   <b>{item.title}</b>
                   <small>{item.detail}</small>
                 </p>
-                <button onClick={() => onNavigate(index === 0 ? 'Financeiro' : index === 1 ? 'Catálogo' : 'Operação')}>
-                  {item.count}
-                </button>
+                <button onClick={() => onNavigate(item.view)}>{item.count}</button>
               </div>
             ))}
+            {!actions.length && <p className="empty">Nenhuma pendência no período.</p>}
           </div>
         </Panel>
 

@@ -171,12 +171,11 @@ export default function App() {
         </a>
 
         <div className="workspace">
-          <span className="workspace-dot">N</span>
+          <span className="workspace-dot">A</span>
           <div>
-            <small>Empresa ativa</small>
-            <b>Nuvem Casa & Cia</b>
+            <small>Loja conectada</small>
+            <b>Amazon.com.br</b>
           </div>
-          <ChevronDown size={15} />
         </div>
 
         <nav>
@@ -206,9 +205,9 @@ export default function App() {
 
       <section className="content" id="top">
         <header>
-          <button className="channel-picker">
-            <span className="all-channels">+</span> Todos os canais <ChevronDown size={15} />
-          </button>
+          <span className="channel-picker">
+            <span className="all-channels">AM</span> Amazon.com.br
+          </span>
           <div className="header-tools">
             <span className={`live-chip status-${live.status}`} title={live.message}>
               <i />

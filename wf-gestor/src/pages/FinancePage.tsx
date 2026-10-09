@@ -1,244 +1,188 @@
-import { useState } from 'react'
-import { AlertOctagon, ArrowLeftRight, Download } from 'lucide-react'
-import { brl, dre, num, payouts, pct } from '../data'
-import { PageHeader, Panel, StatTile, Tag, TabBar } from '../components/ui'
+import { useMemo } from 'react'
+import { AlertOctagon } from 'lucide-react'
+import { brl, num, pct } from '../data'
+import {
+  allocateAds,
+  enrichSales,
+  useAmazonFinance,
+  useAmazonSales,
+  useAmazonSkus,
+} from '../integrations'
+import { PageHeader, Panel, StatTile } from '../components/ui'
 
-const tabs = ['DRE financeiro', 'Conciliação', 'Custos operacionais']
+const SINCE = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
 
-const operatingCosts = [
-  { label: 'Software e ferramentas', value: 684.0, fixed: true },
-  { label: 'Armazenagem e logística', value: 742.5, fixed: false },
-  { label: 'Equipe e terceirizados', value: 1120.0, fixed: true },
-  { label: 'Embalagens e suprimentos', value: 318.4, fixed: false },
-  { label: 'Taxas bancárias e maquininhas', value: 96.3, fixed: false },
-]
+const round = (value: number) => Math.round(value * 100) / 100
 
 export default function FinancePage() {
-  const [tab, setTab] = useState(tabs[0])
+  const amazon = useAmazonSales(SINCE)
+  const finance = useAmazonFinance(SINCE)
+  const skuMeta = useAmazonSkus()
 
-  const faturamento = dre[0].value
-  const liquido = dre.find((line) => line.kind === 'sub')?.value ?? 0
-  const lucroBruto = dre.find((line) => line.label === 'Lucro bruto')?.value ?? 0
-  const lucroLiquido = dre[dre.length - 1].value
+  const rows = useMemo(() => {
+    const source = enrichSales(amazon.sales, finance.orders, skuMeta.skus)
+    const adsTotal = finance.ads
+      .filter((item) => item.date >= SINCE)
+      .reduce((sum, item) => sum + item.amount, 0)
+    return allocateAds(source, adsTotal)
+  }, [amazon.sales, finance.orders, finance.ads, skuMeta.skus])
 
-  const divergentes = payouts.filter((payout) => payout.status !== 'Conferido')
-  const diferenca = divergentes.reduce((sum, payout) => sum + (payout.expected - payout.paid), 0)
-  const conciliado = payouts.filter((payout) => payout.status === 'Conferido').length
+  const adsTotal = finance.ads
+    .filter((item) => item.date >= SINCE)
+    .reduce((sum, item) => sum + item.amount, 0)
+
+  const known = rows.filter((sale) => sale.partial === false)
+
+  const totals = useMemo(() => {
+    const acc = rows.reduce(
+      (sum, sale) => ({
+        gross: sum.gross + sale.gross,
+        units: sum.units + sale.qty,
+        orders: sum.orders + 1,
+      }),
+      { gross: 0, units: 0, orders: 0 },
+    )
+    const fees = known.reduce((sum, sale) => sum + sale.commission + sale.fees, 0)
+    const taxes = known.reduce((sum, sale) => sum + sale.taxes, 0)
+    const refunds = finance.orders
+      ? Object.values(finance.orders).reduce((sum, order) => sum + order.refunds, 0)
+      : 0
+    const net = known.reduce((sum, sale) => sum + sale.net, 0)
+    const cost = known.filter((sale) => !sale.costUnknown).reduce((sum, sale) => sum + sale.cost, 0)
+    const lucroBruto = round(net - cost)
+    const lucroLiquido = round(lucroBruto - adsTotal)
+    return {
+      ...acc,
+      fees: round(fees),
+      taxes: round(taxes),
+      refunds: round(refunds),
+      net: round(net),
+      cost: round(cost),
+      liquidoMarketplaces: round(net - refunds),
+      lucroBruto,
+      lucroLiquido,
+    }
+  }, [rows, known, finance.orders, adsTotal])
+
+  const semExtrato = rows.length - known.length
+  const semCusto = known.filter((sale) => sale.costUnknown).length
+  const faturamento = totals.gross
+  const margem = (value: number) => (faturamento > 0 ? pct((value / faturamento) * 100) : pct(0))
+  const ticket = totals.orders > 0 ? faturamento / totals.orders : 0
+  const custoVenda = faturamento > 0 ? (totals.cost / faturamento) * 100 : 0
+
+  const lines = [
+    { label: 'Faturamento bruto', value: faturamento, kind: 'total', note: `${totals.orders} pedidos nos últimos 30 dias` },
+    { label: '(-) Impostos sobre vendas', value: -totals.taxes, kind: 'deduction' },
+    { label: '(-) Comissões e taxas de serviço', value: -totals.fees, kind: 'deduction' },
+    { label: '(-) Devoluções e estornos', value: -totals.refunds, kind: 'deduction' },
+    { label: 'Líquido de marketplaces', value: totals.liquidoMarketplaces, kind: 'sub' },
+    { label: '(-) Custo dos produtos vendidos', value: -totals.cost, kind: 'deduction', note: semCusto ? `${semCusto} pedidos ainda sem custo` : undefined },
+    { label: 'Lucro bruto', value: totals.lucroBruto, kind: 'result' },
+    { label: '(-) Investimento em Ads', value: -adsTotal, kind: 'deduction' },
+    { label: 'Lucro líquido operacional', value: totals.lucroLiquido, kind: 'result' },
+  ]
+
+  const barSegments = [
+    { label: 'Impostos e comissões', value: faturamento > 0 ? ((totals.taxes + totals.fees) / faturamento) * 100 : 0, tone: 'bar-a' },
+    { label: 'Custo dos produtos', value: custoVenda, tone: 'bar-b' },
+    { label: 'Ads', value: faturamento > 0 ? (adsTotal / faturamento) * 100 : 0, tone: 'bar-c' },
+    { label: 'Lucro líquido', value: faturamento > 0 ? (totals.lucroLiquido / faturamento) * 100 : 0, tone: 'bar-d' },
+  ]
+
+  const semDados = amazon.status !== 'live' && rows.length === 0
 
   return (
     <>
       <PageHeader
         eyebrow="Resumo financeiro"
         title="DRE e conciliação"
-        description="Do faturamento bruto ao lucro líquido, com os repasses de cada marketplace conferidos um a um."
-        action={
-          <button className="ghost lg">
-            <Download size={16} /> Exportar DRE
-          </button>
-        }
+        description="Do faturamento bruto ao lucro líquido, calculado sobre os pedidos e o extrato financeiro reais da Amazon."
       />
 
-      <TabBar items={tabs} active={tab} onChange={setTab} />
+      {semDados && (
+        <div className="data-mode is-demo">
+          <b>Sem dados no momento.</b> {amazon.message}
+          {amazon.hint ? ` · ${amazon.hint}` : ''}
+        </div>
+      )}
+      {amazon.status === 'live' && semExtrato > 0 && (
+        <div className="data-mode is-demo">
+          <b>{semExtrato} pedido{semExtrato > 1 ? 's' : ''} sem extrato.</b> Comissões, taxas e impostos aparecem assim
+          que a Amazon publicar o repasse.
+        </div>
+      )}
 
-      {tab === 'DRE financeiro' && (
-        <>
-          <section className="metrics">
-            <StatTile label="Faturamento bruto" value={brl(faturamento)} hint="período selecionado" />
-            <StatTile label="Líquido de marketplaces" value={brl(liquido)} hint="após taxas e impostos" />
-            <StatTile label="Lucro bruto" value={brl(lucroBruto)} hint={`margem ${pct((lucroBruto / faturamento) * 100)}`} tone="positive" />
-            <StatTile
-              label="Lucro líquido operacional"
-              value={brl(lucroLiquido)}
-              hint={`margem ${pct((lucroLiquido / faturamento) * 100)}`}
-              tone="positive"
-            />
-          </section>
+      <section className="metrics">
+        <StatTile label="Faturamento bruto" value={brl(faturamento)} hint="últimos 30 dias" />
+        <StatTile label="Líquido de marketplaces" value={brl(totals.liquidoMarketplaces)} hint="após taxas e impostos" />
+        <StatTile label="Lucro bruto" value={brl(totals.lucroBruto)} hint={`margem ${margem(totals.lucroBruto)}`} tone="positive" />
+        <StatTile label="Lucro líquido operacional" value={brl(totals.lucroLiquido)} hint={`margem ${margem(totals.lucroLiquido)}`} tone="positive" />
+      </section>
 
-          <div className="two-col">
-            <Panel title="Demonstrativo de resultado" hint="Competência do período">
-              <div className="dre">
-                {dre.map((line) => (
-                  <div key={line.label} className={`dre-line kind-${line.kind}`}>
-                    <span>
-                      {line.label}
-                      {line.note && <small>{line.note}</small>}
-                    </span>
-                    <b>{brl(line.value)}</b>
-                  </div>
-                ))}
+      <div className="two-col">
+        <Panel title="Demonstrativo de resultado" hint="Competência dos últimos 30 dias">
+          <div className="dre">
+            {lines.map((line) => (
+              <div key={line.label} className={`dre-line kind-${line.kind}`}>
+                <span>
+                  {line.label}
+                  {line.note && <small>{line.note}</small>}
+                </span>
+                <b>{brl(line.value)}</b>
               </div>
-            </Panel>
-
-            <div className="stack">
-              <Panel title="Composição do resultado" hint="Participação no faturamento">
-                <div className="bars">
-                  {[
-                    ['Impostos e comissões', 27.6, 'bar-a'],
-                    ['Custo dos produtos', 27.6, 'bar-b'],
-                    ['Ads e despesas', 13.2, 'bar-c'],
-                    ['Lucro líquido', 22.9, 'bar-d'],
-                  ].map(([label, value, tone]) => (
-                    <div key={label as string} className="bar-row">
-                      <span>{label}</span>
-                      <div className="bar-track">
-                        <i className={tone as string} style={{ width: `${value as number}%` }} />
-                      </div>
-                      <b>{pct(value as number)}</b>
-                    </div>
-                  ))}
-                </div>
-                <p className="hint-text">
-                  Política de cálculo versionada: alterações de custo, imposto ou associação geram novo recálculo, mantendo o
-                  histórico anterior.
-                </p>
-              </Panel>
-
-              <Panel title="Indicadores" hint="Saúde financeira">
-                <div className="indicator-grid">
-                  <div>
-                    <span>ROAS médio</span>
-                    <b>3,7x</b>
-                  </div>
-                  <div>
-                    <span>Ticket médio</span>
-                    <b>{brl(faturamento / 18)}</b>
-                  </div>
-                  <div>
-                    <span>Custo de venda</span>
-                    <b>{pct(27.6)}</b>
-                  </div>
-                  <div>
-                    <span>Ponto de equilíbrio</span>
-                    <b>{brl(19480)}</b>
-                  </div>
-                </div>
-              </Panel>
-            </div>
+            ))}
           </div>
-        </>
-      )}
+        </Panel>
 
-      {tab === 'Conciliação' && (
-        <>
-          <section className="metrics">
-            <StatTile label="Repasse conferido" value={`${conciliado}/${payouts.length}`} hint="períodos batidos" tone="positive" />
-            <StatTile label="Divergência total" value={brl(diferenca)} hint="a investigar" tone="attention" />
-            <StatTile label="A receber" value={brl(payouts.find((p) => p.status === 'Pendente')?.expected ?? 0)} hint="agendado pelo canal" />
-            <StatTile label="Última conferência" value="há 14 min" hint="sincronização automática" />
-          </section>
-
-          <Panel title="Repasses por marketplace" hint="Venda x recebimento" className="sales-panel">
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Repasse</th>
-                    <th>Canal</th>
-                    <th>Período</th>
-                    <th>Esperado</th>
-                    <th>Recebido</th>
-                    <th>Diferença</th>
-                    <th>Situação</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {payouts.map((payout) => {
-                    const diff = payout.paid - payout.expected
-                    return (
-                      <tr key={payout.id}>
-                        <td className="order">{payout.id}</td>
-                        <td>
-                          <span className="channel">{payout.channel}</span>
-                        </td>
-                        <td className="mono">{payout.period}</td>
-                        <td>{brl(payout.expected)}</td>
-                        <td>{brl(payout.paid)}</td>
-                        <td className={diff === 0 ? 'muted' : diff < 0 ? 'loss' : 'profit'}>
-                          {diff === 0 ? '—' : brl(diff)}
-                        </td>
-                        <td>
-                          <Tag value={payout.status} />
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+        <div className="stack">
+          <Panel title="Composição do resultado" hint="Participação no faturamento">
+            <div className="bars">
+              {barSegments.map((segment) => (
+                <div key={segment.label} className="bar-row">
+                  <span>{segment.label}</span>
+                  <div className="bar-track">
+                    <i className={segment.tone} style={{ width: `${Math.max(0, Math.min(segment.value, 100))}%` }} />
+                  </div>
+                  <b>{pct(segment.value)}</b>
+                </div>
+              ))}
             </div>
           </Panel>
 
-          <section className="notice">
-            <AlertOctagon size={18} />
-            <div>
-              <b>{divergentes.length} repasses com diferença</b>
-              <p>
-                O total apontado é de {brl(Math.abs(diferenca))}. Cada divergência abre um histórico com motivos de ajuste,
-                estornos e taxas cobradas a mais.
-              </p>
-            </div>
-            <button className="ghost">Revisar divergências</button>
-          </section>
-        </>
-      )}
-
-      {tab === 'Custos operacionais' && (
-        <>
-          <section className="metrics">
-            <StatTile
-              label="Despesas do mês"
-              value={brl(operatingCosts.reduce((sum, item) => sum + item.value, 0))}
-              hint="custos fixos e variáveis"
-            />
-            <StatTile label="Custo fixo mensal" value={brl(operatingCosts.filter((c) => c.fixed).reduce((s, c) => s + c.value, 0))} hint="recorrentes" />
-            <StatTile label="Custo variável" value={brl(operatingCosts.filter((c) => !c.fixed).reduce((s, c) => s + c.value, 0))} hint="oscila com volume" />
-            <StatTile label="Por pedido" value={brl(operatingCosts.reduce((s, c) => s + c.value, 0) / 18)} hint="sobre 18 pedidos" />
-          </section>
-
-          <Panel
-            title="Despesas operacionais"
-            hint="Entradas manuais com vigência"
-            action={
-              <button className="primary">
-                <ArrowLeftRight size={16} /> Lançar despesa
-              </button>
-            }
-          >
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Descrição</th>
-                    <th>Natureza</th>
-                    <th>Valor mensal</th>
-                    <th>Participação</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {operatingCosts.map((cost) => {
-                    const total = operatingCosts.reduce((sum, item) => sum + item.value, 0)
-                    return (
-                      <tr key={cost.label}>
-                        <td>
-                          <b>{cost.label}</b>
-                        </td>
-                        <td>
-                          <span className="channel">{cost.fixed ? 'Fixo' : 'Variável'}</span>
-                        </td>
-                        <td>{brl(cost.value)}</td>
-                        <td>{pct((cost.value / total) * 100)}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+          <Panel title="Indicadores" hint="Saúde financeira">
+            <div className="indicator-grid">
+              <div>
+                <span>Ticket médio</span>
+                <b>{brl(ticket)}</b>
+              </div>
+              <div>
+                <span>Custo de venda</span>
+                <b>{pct(custoVenda)}</b>
+              </div>
+              <div>
+                <span>Unidades vendidas</span>
+                <b>{num(totals.units)}</b>
+              </div>
+              <div>
+                <span>Investimento em Ads</span>
+                <b>{brl(adsTotal)}</b>
+              </div>
             </div>
           </Panel>
+        </div>
+      </div>
 
-          <section className="footnote">
-            Despesas cadastradas entram automaticamente no DRE e no cálculo de margem por produto ({num(operatingCosts.length)}{' '}
-            categorias ativas).
-          </section>
-        </>
+      {semCusto > 0 && (
+        <section className="notice">
+          <AlertOctagon size={18} />
+          <div>
+            <b>{semCusto} pedido{semCusto > 1 ? 's' : ''} sem custo de produto</b>
+            <p>
+              Informe o custo dos SKUs na aba Catálogo para que o lucro e a margem sejam calculados de verdade.
+            </p>
+          </div>
+        </section>
       )}
     </>
   )

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Sale } from '../data'
-import { products } from '../data'
 import { proxyHint, readProxyUrl } from './amazon/connector'
 import { ALL_ORDERS_SINCE } from './amazonSales'
 
@@ -200,9 +199,8 @@ export function enrichSales(
     const rawSku = info.skus[0] ?? ''
     const hasSku = Boolean(rawSku) && rawSku !== '-' && rawSku !== '—'
     const sku = hasSku ? rawSku : sale.sku
-    const catalog = products.find((item) => item.sku.toUpperCase() === sku.toUpperCase())
     const meta = hasSku ? skuInfo[sku] : undefined
-    const costUnit = meta?.cost ?? catalog?.cost
+    const costUnit = meta?.cost
     const cost = costUnit == null ? 0 : round(costUnit * sale.qty)
     const net = round(sale.gross + info.refunds - info.taxes - info.commission - info.fees)
 
@@ -210,7 +208,7 @@ export function enrichSales(
       ...sale,
       sku,
       externalSku: hasSku ? sku : sale.externalSku,
-      product: meta?.name ?? catalog?.name ?? (hasSku ? sku : sale.product),
+      product: meta?.name ?? (hasSku ? sku : sale.product),
       commission: info.commission,
       fees: info.fees,
       taxes: info.taxes,

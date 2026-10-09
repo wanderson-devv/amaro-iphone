@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { CheckCircle2, CircleHelp, Link, RefreshCw, Save, ShieldCheck } from 'lucide-react'
-import { accounts, num, type Channel } from '../data'
+import { num } from '../data'
 import {
   DEFAULT_PROXY_URL,
   describeSync,
   getAutoSyncStatus,
   readProxyUrl,
+  readSyncSnapshot,
   runSyncNow,
   setAutoSyncEnabled,
   syncResources,
@@ -14,28 +15,19 @@ import {
 } from '../integrations'
 import { PageHeader, Panel, StatTile, Tag } from '../components/ui'
 
-const methods: Record<Channel, string[]> = {
-  Amazon: ['Autorização via Selling Partner', 'Sandbox antes de produção', 'Escopos por recurso'],
-  'Mercado Livre': ['OAuth do vendedor', 'App oficial registrado', 'Renovação automática do token'],
-  Shopee: ['OAuth da loja', 'Assinatura de requisições', 'Ambiente de teste'],
-  'TikTok Shop': ['OAuth da loja', 'Escopos de pedidos e catálogo', 'Retentativa com backoff'],
-}
-
-const capabilities: Record<Channel, string[]> = {
-  Amazon: ['Pedidos e extrato', 'FBA e DBA', 'Anúncios', 'Precificação'],
-  'Mercado Livre': ['Pedidos e repasses', 'Anúncios', 'Estoque', 'Custos'],
-  Shopee: ['Pedidos e repasses', 'Estoque', 'Custos'],
-  'TikTok Shop': ['Pedidos', 'Estoque', 'Custos'],
-}
+const AMAZON_METHODS = ['Autorização via Selling Partner Portal', 'Token LWA no proxy local', 'Escopos por recurso']
+const AMAZON_CAPABILITIES = ['Pedidos e itens', 'Extrato financeiro', 'Estoque FBA', 'Anúncios e catálogo']
 
 export default function IntegrationsPage() {
-  const [state, setState] = useState(accounts)
   const [notice, setNotice] = useState('')
   const autoSync = useAutoSyncStatus()
   const running = autoSync.running
   const amazonStates = autoSync.states
   const [proxyUrl, setProxyUrl] = useState(() => readProxyUrl())
   const configured = Boolean(proxyUrl)
+  const snapshot = readSyncSnapshot()
+  const ordersSynced = snapshot?.orders ?? 0
+  const amazonConnected = autoSync.ok !== false
 
   const saveProxy = () => {
     const typed = proxyUrl.trim()
@@ -53,65 +45,41 @@ export default function IntegrationsPage() {
   const run = async () => {
     if (autoSync.running) return
     await runSyncNow()
-    if (getAutoSyncStatus().ok) {
-      setState((current) =>
-        current.map((account) => (account.channel === 'Amazon' ? { ...account, lastSync: 'agora mesmo' } : account)),
-      )
-    }
-  }
-
-  const connect = (channel: Channel) => {
-    setState((current) =>
-      current.map((account) =>
-        account.channel === channel
-          ? { ...account, status: 'Conectado', lastSync: 'agora mesmo' }
-          : account,
-      ),
-    )
-    setNotice(`Conexão com ${channel} confirmada. A primeira sincronização foi iniciada.`)
-    if (channel === 'Amazon') void run()
   }
 
   const sync = () => {
     void run()
-    setState((current) => current.map((account) => ({ ...account, lastSync: 'agora mesmo' })))
-    setNotice('Sincronização solicitada em todos os canais conectados.')
   }
-
-  const syncChannel = (channel: Channel) => {
-    if (channel === 'Amazon') {
-      void run()
-      return
-    }
-    setState((current) =>
-      current.map((account) => (account.channel === channel ? { ...account, lastSync: 'agora mesmo' } : account)),
-    )
-    setNotice(`Sincronização de ${channel} executada.`)
-  }
-
-  const connected = state.filter((account) => account.status === 'Conectado').length
-  const orders = state.reduce((sum, account) => sum + account.orders, 0)
 
   return (
     <>
       <PageHeader
         eyebrow="Integrações"
-        title="Contas de marketplace"
-        description="Vincule cada loja por autorização oficial, com escopos separados, token protegido e status de sincronização visível."
+        title="Conta Amazon conectada"
+        description="Vinculo oficial via Selling Partner API: credenciais LWA só no proxy local e status de sincronização visível."
         action={
           <button className="primary" onClick={sync}>
-            <RefreshCw size={17} /> Sincronizar tudo
+            <RefreshCw size={17} className={running ? 'spin' : ''} /> Sincronizar agora
           </button>
         }
       />
 
       <section className="metrics">
-        <StatTile label="Canais conectados" value={`${connected}/${state.length}`} hint="contas autorizadas" tone="positive" />
-        <StatTile label="Pedidos sincronizados" value={num(orders)} hint="acumulado das contas" />
-        <StatTile label="Aguardando autorização" value={num(state.filter((a) => a.status === 'Pendente').length)} hint="conclua o OAuth" tone="attention" />
+        <StatTile
+          label="Canal conectado"
+          value={amazonConnected ? '1' : '0'}
+          hint="Amazon SP-API"
+          tone={amazonConnected ? 'positive' : 'attention'}
+        />
+        <StatTile label="Pedidos sincronizados" value={num(ordersSynced)} hint="última sincronização" />
+        <StatTile
+          label="Recursos disponíveis"
+          value={`${amazonStates.filter((item) => item.status === 'ok').length}/${amazonStates.length}`}
+          hint="pedidos, extrato, estoque e anúncios"
+        />
         <StatTile
           label="Próxima varredura"
-          value={!autoSync.enabled ? 'pausada' : autoSync.running ? 'agora' : 'em até 5 min'}
+          value={!autoSync.enabled ? 'pausada' : running ? 'agora' : 'em até 5 min'}
           hint={autoSync.enabled ? 'agendamento automático' : 'auto-sync desligado'}
           tone={autoSync.enabled ? undefined : 'attention'}
         />
@@ -208,68 +176,64 @@ export default function IntegrationsPage() {
       </Panel>
 
       <div className="integration-grid">
-        {state.map((account) => (
-          <article className="panel integration-card" key={account.channel}>
-            <header>
-              <span className={`channel-badge badge-${account.channel.toLowerCase().replace(' ', '-')}`}>{account.channel.slice(0, 2).toUpperCase()}</span>
-              <div>
-                <h2>{account.channel}</h2>
-                <small>{account.store}</small>
-              </div>
-              <Tag value={account.status} />
-            </header>
-
-            <dl className="integration-meta">
-              <div>
-                <dt>Conectado desde</dt>
-                <dd>{account.since}</dd>
-              </div>
-              <div>
-                <dt>Última sincronização</dt>
-                <dd>{account.lastSync}</dd>
-              </div>
-              <div>
-                <dt>Pedidos</dt>
-                <dd>{num(account.orders)}</dd>
-              </div>
-            </dl>
-
-            <div className="capability-list">
-              {capabilities[account.channel].map((item) => (
-                <span key={item}>
-                  <CheckCircle2 size={13} /> {item}
-                </span>
-              ))}
+        <article className="panel integration-card">
+          <header>
+            <span className="channel-badge badge-amazon">AM</span>
+            <div>
+              <h2>Amazon</h2>
+              <small>Amazon.com.br · SP-API</small>
             </div>
+            <Tag value={amazonConnected ? 'Conectado' : 'Ver proxy'} />
+          </header>
 
-            <div className="method">
-              <ShieldCheck size={14} />
-              <span>{methods[account.channel].join(' · ')}</span>
+          <dl className="integration-meta">
+            <div>
+              <dt>Última sincronização</dt>
+              <dd>{autoSync.lastSync ?? 'nunca'}</dd>
             </div>
+            <div>
+              <dt>Pedidos</dt>
+              <dd>{num(ordersSynced)}</dd>
+            </div>
+            <div>
+              <dt>Recursos</dt>
+              <dd>
+                {amazonStates.filter((item) => item.status === 'ok').length}/{amazonStates.length}
+              </dd>
+            </div>
+          </dl>
 
-            {account.status === 'Conectado' ? (
-              <button className="ghost lg full" onClick={() => syncChannel(account.channel)}>
-                <RefreshCw size={15} /> Sincronizar canal
-              </button>
-            ) : (
-              <button className="primary full" onClick={() => connect(account.channel)}>
-                <Link size={16} /> Autorizar conta
-              </button>
-            )}
-          </article>
-        ))}
+          <div className="capability-list">
+            {AMAZON_CAPABILITIES.map((item) => (
+              <span key={item}>
+                <CheckCircle2 size={13} /> {item}
+              </span>
+            ))}
+          </div>
+
+          <div className="method">
+            <ShieldCheck size={14} />
+            <span>{AMAZON_METHODS.join(' · ')}</span>
+          </div>
+
+          <button className="ghost lg full" onClick={sync}>
+            <RefreshCw size={15} className={running ? 'spin' : ''} /> Sincronizar canal
+          </button>
+        </article>
       </div>
 
       <div className="two-col">
-        <Panel title="Escopo de dados por canal" hint="Menor privilégio por integração">
+        <Panel title="Escopo de dados" hint="Menor privilégio por integração">
           <div className="scope-list">
-            {state.map((account) => (
-              <div key={account.channel}>
-                <b>{account.channel}</b>
-                <p>{methods[account.channel].join(' · ')}</p>
-              </div>
-            ))}
+            <div>
+              <b>Amazon SP-API</b>
+              <p>{AMAZON_METHODS.join(' · ')}</p>
+            </div>
           </div>
+          <p className="hint-text">
+            Nenhum total é apresentado como “tempo real” sem a data de atualização ao lado. Falhas de sincronização
+            aparecem com motivo e nova tentativa.
+          </p>
         </Panel>
 
         <Panel title="Saúde das sincronizações" hint="Atraso e falhas ficam visíveis">
@@ -277,22 +241,16 @@ export default function IntegrationsPage() {
             <li>
               <span className={`dot ${autoSync.ok === true ? 'on' : ''}`} /> Amazon · {describeSync(autoSync)}
             </li>
-            <li>
-              <span className="dot on" /> Mercado Livre · pedidos há 14 min
-            </li>
-            <li>
-              <span className="dot on" /> Shopee · pedidos há 21 min
-            </li>
-            <li>
-              <span className="dot" /> TikTok Shop · aguardando autorização
-            </li>
           </ul>
           <p className="hint-text">
-            Nenhum total é apresentado como “tempo real” sem a data de atualização ao lado. Falhas de sincronização aparecem com
-            motivo e nova tentativa.
+            Autorize a conta no Solution Provider Portal e mantenha o proxy local rodando para dados sempre atualizados.
           </p>
         </Panel>
       </div>
+
+      <section className="footnote">
+        <Link size={14} /> Demais canais entram aqui quando tiverem integração oficial configurada.
+      </section>
 
       {notice && (
         <div className="toast" role="status">

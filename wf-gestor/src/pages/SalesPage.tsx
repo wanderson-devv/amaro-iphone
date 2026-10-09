@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Download, Filter, Search, X } from 'lucide-react'
-import { brl, num, pct, sales as demoSales } from '../data'
+import { brl, num, pct } from '../data'
 import {
   ALL_ORDERS_SINCE,
   FINANCE_SINCE,
@@ -12,7 +12,7 @@ import {
 } from '../integrations'
 import { PageHeader, Panel, StatTile, Tag } from '../components/ui'
 
-const channels = ['Todos', 'Amazon', 'Mercado Livre', 'Shopee', 'TikTok Shop']
+const channels = ['Todos', 'Amazon']
 const statuses = ['Todos', 'Recebido', 'A liberar', 'Em disputa', 'Devolvido']
 
 export default function SalesPage() {
@@ -25,9 +25,9 @@ export default function SalesPage() {
   const finance = useAmazonFinance(FINANCE_SINCE)
   const skuMeta = useAmazonSkus()
   const usingReal = amazon.status === 'live' || (amazon.status !== 'inicial' && amazon.sales.length > 0)
-  const source = usingReal ? enrichSales(amazon.sales, finance.orders, skuMeta.skus) : demoSales
-  const adsTotal = usingReal ? finance.ads.reduce((sum, item) => sum + item.amount, 0) : 0
-  const enriched = usingReal ? allocateAds(source, adsTotal) : source
+  const source = enrichSales(amazon.sales, finance.orders, skuMeta.skus)
+  const adsTotal = finance.ads.reduce((sum, item) => sum + item.amount, 0)
+  const enriched = allocateAds(source, adsTotal)
 
   const filtered = useMemo(
     () =>
@@ -44,8 +44,8 @@ export default function SalesPage() {
   const selected = selectedId ? (rows.find((sale) => sale.id === selectedId) ?? null) : null
 
   const knownRows = rows.filter((sale) => sale.partial === false)
-  const hasNet = usingReal ? knownRows.length > 0 : true
-  const hasCost = usingReal ? knownRows.length > 0 && knownRows.every((sale) => !sale.costUnknown) : true
+  const hasNet = knownRows.length > 0
+  const hasCost = knownRows.length > 0 && knownRows.every((sale) => !sale.costUnknown)
   const hasProfit = hasNet && hasCost
 
   const totals = rows.reduce(
@@ -95,7 +95,7 @@ export default function SalesPage() {
 
       {!usingReal && (
         <div className="data-mode is-demo">
-          <b>Modo demonstração.</b> {amazon.message}
+          <b>Sem dados no momento.</b> {amazon.message}
           {amazon.hint ? ` · ${amazon.hint}` : ''}
         </div>
       )}
