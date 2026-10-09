@@ -203,12 +203,13 @@ export function enrichSales(
     const costUnit = meta?.cost
     const cost = costUnit == null ? 0 : round(costUnit * sale.qty)
     const net = round(sale.gross + info.refunds - info.taxes - info.commission - info.fees)
+    const temTitulo = Boolean(sale.product) && sale.product !== 'Pedido na Amazon'
 
     return {
       ...sale,
       sku,
       externalSku: hasSku ? sku : sale.externalSku,
-      product: meta?.name ?? (hasSku ? sku : sale.product),
+      product: meta?.name ?? (temTitulo ? sale.product : hasSku ? sku : sale.product),
       commission: info.commission,
       fees: info.fees,
       taxes: info.taxes,

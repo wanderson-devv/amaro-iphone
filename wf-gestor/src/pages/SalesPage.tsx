@@ -151,15 +151,15 @@ export default function SalesPage() {
                 <th>Pedido</th>
                 <th>Data</th>
                 <th>Produto / SKU</th>
-                <th>Canal</th>
-                <th>Qtd</th>
-                <th>Venda</th>
-                <th>Taxas</th>
-                <th>Custo</th>
-                <th>Imposto</th>
-                <th>Lucro</th>
-                <th>Margem</th>
-                <th>Status</th>
+                <th className="center">Canal</th>
+                <th className="num">Qtd</th>
+                <th className="num">Venda</th>
+                <th className="num">Taxas</th>
+                <th className="num">Custo</th>
+                <th className="num">Imposto</th>
+                <th className="num">Lucro</th>
+                <th className="num">Margem</th>
+                <th className="center">Status</th>
               </tr>
             </thead>
             <tbody>
@@ -168,22 +168,26 @@ export default function SalesPage() {
                   <td className="order">{sale.id}</td>
                   <td className="mono">{new Date(`${sale.date}T12:00:00`).toLocaleDateString('pt-BR')}</td>
                   <td>
-                    <b>{sale.product}</b>
-                    <small className="sub">{sale.sku === '—' ? `${sale.qty} un.` : sale.sku}</small>
+                    <div className="product-cell">
+                      <b>{sale.product}</b>
+                      <small className="sub">
+                        {sale.sku === '—' ? `${sale.qty} un.` : `${sale.sku} · ${sale.qty} un.`}
+                      </small>
+                    </div>
                   </td>
-                  <td>
+                  <td className="center">
                     <span className="channel">{sale.channel}</span>
                   </td>
-                  <td>{sale.qty}</td>
-                  <td>{brl(sale.gross)}</td>
-                  <td className="muted">{sale.partial ? '—' : brl(sale.commission + sale.fees)}</td>
-                  <td className="muted">{sale.costUnknown ? '—' : brl(sale.cost)}</td>
-                  <td className="muted">{sale.partial ? '—' : brl(sale.taxes)}</td>
-                  <td className={sale.partial || sale.costUnknown ? 'muted' : sale.profit >= 0 ? 'profit' : 'loss'}>
+                  <td className="num">{sale.qty}</td>
+                  <td className="num">{brl(sale.gross)}</td>
+                  <td className="num muted">{sale.partial ? '—' : brl(sale.commission + sale.fees)}</td>
+                  <td className="num muted">{sale.costUnknown ? '—' : brl(sale.cost)}</td>
+                  <td className="num muted">{sale.partial ? '—' : brl(sale.taxes)}</td>
+                  <td className={sale.partial || sale.costUnknown ? 'num muted' : `num ${sale.profit >= 0 ? 'profit' : 'loss'}`}>
                     {sale.partial || sale.costUnknown ? '—' : brl(sale.profit)}
                   </td>
-                  <td>{sale.partial || sale.costUnknown ? '—' : pct(sale.margin)}</td>
-                  <td>
+                  <td className="num">{sale.partial || sale.costUnknown ? '—' : pct(sale.margin)}</td>
+                  <td className="center">
                     <Tag value={sale.status} />
                   </td>
                 </tr>

@@ -54,11 +54,13 @@ export function mapDetailedOrder(order: DetailedOrder): Sale {
   const units = qty > 0 ? qty : 1
   const gross = Number(order.amount) || 0
 
+  const extra = order.items.length > 1 ? ` (+${order.items.length - 1} itens)` : ''
+
   return {
     id: order.id,
     date: order.purchasedAt.slice(0, 10),
     channel: 'Amazon',
-    product: first?.title ?? 'Pedido na Amazon',
+    product: `${first?.title ?? 'Pedido na Amazon'}${extra}`,
     sku: first?.sku ?? '—',
     externalSku: first?.sku ?? '—',
     asin: first?.asin ?? '—',
