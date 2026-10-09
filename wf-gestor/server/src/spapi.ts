@@ -48,6 +48,8 @@ export async function getAccessToken(): Promise<string> {
 
 const amzDate = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')
 
+const USER_AGENT = 'WFGestor/1.0 (Language=TypeScript; Platform=node)'
+
 const MIN_INTERVAL_MS = 1100
 let gate: Promise<unknown> = Promise.resolve()
 let lastRequestAt = 0
@@ -62,50 +64,97 @@ function acquireSlot(): Promise<void> {
   return next
 }
 
-export async function spGet(path: string, params: Record<string, string | undefined> = {}) {
+type FetchInit = Parameters<typeof fetch>[1]
+type FetchResponse = Awaited<ReturnType<typeof fetch>>
+
+async function call(url: string, makeInit: () => FetchInit): Promise<FetchResponse> {
+  let response: FetchResponse | undefined
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, response?.status === 429 ? 1400 : 700))
+    }
+
+    await acquireSlot()
+    response = await fetch(url, makeInit())
+
+    const retryable = response.status === 429 || (response.status >= 500 && response.status <= 599)
+    if (!retryable) break
+  }
+
+  return response as FetchResponse
+}
+
+async function jsonRequest(
+  path: string,
+  options: { method?: 'GET' | 'POST'; body?: unknown; params?: Record<string, string | undefined> } = {},
+) {
   const url = new URL(path, `${endpoints[config.region]}/`)
-  for (const [key, value] of Object.entries(params)) {
+  for (const [key, value] of Object.entries(options.params ?? {})) {
     if (value) url.searchParams.set(key, value)
   }
 
   const token = await getAccessToken()
-  const headers = {
-    'x-amz-access-token': token,
-    'x-amz-date': amzDate(),
-    'user-agent': 'WFGestor/1.0 (Language=TypeScript; Platform=node)',
-    accept: 'application/json',
-  }
+  const method = options.method ?? 'GET'
+  const payload = options.body === undefined ? undefined : JSON.stringify(options.body)
 
-  let text = ''
-  let status = 0
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, status === 429 ? 1400 : 700))
-      headers['x-amz-date'] = amzDate()
+  const response = await call(url.toString(), () => {
+    const headers: Record<string, string> = {
+      'x-amz-access-token': token,
+      'x-amz-date': amzDate(),
+      'user-agent': USER_AGENT,
+      accept: 'application/json',
     }
+    if (payload !== undefined) headers['content-type'] = 'application/json'
+    return { method, headers, body: payload }
+  })
 
-    await acquireSlot()
-    const response = await fetch(url, { headers })
-    text = await response.text()
-    status = response.status
-
-    const retryable = status === 429 || (status >= 500 && status <= 599)
-    if (!retryable) break
-  }
-
-  if (!status || status < 200 || status >= 300) {
-    throw new SpApiError(`A Amazon respondeu HTTP ${status} em ${path}.`, explain(text))
+  const text = await response.text()
+  if (!response.ok) {
+    throw new SpApiError(`A Amazon respondeu HTTP ${response.status} em ${path}.`, explain(text))
   }
 
   return text ? (JSON.parse(text) as Record<string, unknown>) : {}
 }
 
+export async function spGet(path: string, params: Record<string, string | undefined> = {}) {
+  return jsonRequest(path, { params })
+}
+
+export async function spPost(path: string, body: unknown) {
+  return jsonRequest(path, { method: 'POST', body })
+}
+
+export async function spDownload(url: string): Promise<Buffer> {
+  const response = await call(url, () => ({
+    headers: { 'user-agent': USER_AGENT, accept: '*/*' },
+  }))
+
+  const buffer = Buffer.from(await response.arrayBuffer())
+  if (!response.ok) {
+    throw new SpApiError(
+      `A Amazon recusou o download do arquivo (HTTP ${response.status}).`,
+      explain(buffer.toString('utf8')),
+    )
+  }
+  return buffer
+}
+
 function explain(body: string) {
   try {
-    const parsed = JSON.parse(body) as { errors?: { message?: string; details?: string }[] }
+    const parsed = JSON.parse(body) as {
+      errors?: { message?: string; details?: string; code?: string }[]
+      code?: string
+      message?: string
+      details?: string
+    }
     const first = parsed.errors?.[0]
-    return [first?.message, first?.details].filter(Boolean).join(' · ') || body.slice(0, 400)
+    const message = first?.message ?? parsed.message
+    const details = first?.details ?? parsed.details
+    const code = first?.code ?? parsed.code
+    return [code && !message?.includes(code) ? code : '', message, details]
+      .filter(Boolean)
+      .join(' · ') || body.slice(0, 400)
   } catch {
     return body.slice(0, 400) || 'Sem detalhe do erro.'
   }

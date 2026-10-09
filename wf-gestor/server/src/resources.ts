@@ -1,4 +1,5 @@
 import { config } from './config.js'
+import { is403, runReport } from './reports.js'
 import { SpApiError, spGet } from './spapi.js'
 
 export type ResourceKey = 'orders' | 'settlements' | 'inventory' | 'listings' | 'finance'
@@ -97,16 +98,64 @@ async function fetchListings(): Promise<ResourceResult> {
     )
   }
 
-  const response = (await spGet('/listings/2021-08-01/items', {
-    marketplaceIds: config.marketplaceId,
-    sellerId: config.sellerId,
-    includedData: 'identifiers',
-    locale: 'pt_BR',
-  })) as SpPayload<{ items?: unknown[] }>
+  try {
+    const response = (await spGet('/listings/2021-08-01/items', {
+      marketplaceIds: config.marketplaceId,
+      sellerId: config.sellerId,
+      includedData: 'identifiers',
+      locale: 'pt_BR',
+    })) as SpPayload<{ items?: unknown[] }>
 
-  const payload = unwrap<{ items?: unknown[] }>(response)
-  const count = (payload.items ?? []).length
-  return { count, detail: count ? 'anúncios ativos na loja' : 'nenhum anúncio retornado' }
+    const payload = unwrap<{ items?: unknown[] }>(response)
+    const count = (payload.items ?? []).length
+    return { count, detail: count ? 'anúncios ativos na loja' : 'nenhum anúncio retornado' }
+  } catch (error) {
+    if (!is403(error)) throw error
+    return listingsFromReport()
+  }
+}
+
+const LISTINGS_REPORT = 'GET_MERCHANT_LISTINGS_DATA'
+const listingCatalog = new Map<string, { title?: string; asin?: string }>()
+
+function normalized(row: Record<string, string>): Map<string, string> {
+  const fields = new Map<string, string>()
+  for (const [key, value] of Object.entries(row)) {
+    if (value) fields.set(key.toLowerCase().replace(/[^a-z0-9]/g, ''), value)
+  }
+  return fields
+}
+
+function pick(fields: Map<string, string>, aliases: string[]): string {
+  for (const alias of aliases) {
+    const value = fields.get(alias.toLowerCase().replace(/[^a-z0-9]/g, ''))
+    if (value) return value
+  }
+  return ''
+}
+
+async function listingsFromReport(): Promise<ResourceResult> {
+  const report = await runReport(LISTINGS_REPORT)
+  listingCatalog.clear()
+
+  let active = 0
+  for (const row of report.rows) {
+    const fields = normalized(row)
+    const sku = pick(fields, ['sku', 'sellersku'])
+    const title = pick(fields, ['itemname', 'title', 'productname'])
+    const asin = pick(fields, ['asin1', 'asin'])
+    const status = pick(fields, ['listingstatus', 'status']).toUpperCase()
+
+    if (sku) listingCatalog.set(sku, { title: title || undefined, asin: asin || undefined })
+    if (!status || status === 'ACTIVE') active += 1
+  }
+
+  return {
+    count: active,
+    detail: report.rows.length
+      ? `${active} anúncios ativos na loja · lidos do relatório da Amazon`
+      : 'nenhum anúncio no relatório da Amazon',
+  }
 }
 
 export type FinanceOrder = {
@@ -617,9 +666,88 @@ async function readOrderItems(orderId: string): Promise<DetailedItem[] | null> {
   }
 }
 
-async function readProductTitle(orderId: string): Promise<string | undefined> {
-  const items = await readOrderItems(orderId)
-  return items?.[0]?.title
+function titleFrom(index: OrderIndex | null, orderId: string): string | undefined {
+  return index?.get(orderId)?.find((item) => item.title)?.title
+}
+
+type OrderIndex = Map<string, DetailedItem[]>
+
+const ORDER_INDEX_DAYS = 400
+
+const orderIndexCache = new Map<string, { value: OrderIndex | null; expiresAt: number }>()
+const orderIndexRunning = new Map<string, Promise<OrderIndex | null>>()
+
+const orderIndexKey = () => new Date(Date.now() - ORDER_INDEX_DAYS * 86400000).toISOString().slice(0, 10)
+
+async function ensureCatalog(): Promise<boolean> {
+  if (listingCatalog.size > 0) return true
+  try {
+    await listingsFromReport()
+    return listingCatalog.size > 0
+  } catch {
+    return false
+  }
+}
+
+async function buildOrderIndex(since: string): Promise<OrderIndex> {
+  if (!(await ensureCatalog())) {
+    throw new SpApiError('Catálogo de anúncios indisponível para identificar os itens do pedido.')
+  }
+
+  const finance = await fetchFinance(since)
+  const index: OrderIndex = new Map()
+
+  for (const [orderId, order] of Object.entries(finance.orders)) {
+    if (!order.skus.length) continue
+    const several = order.skus.length > 1
+    index.set(
+      orderId,
+      order.skus.map((sku) => {
+        const listed = listingCatalog.get(sku)
+        return {
+          sku,
+          title: listed?.title,
+          asin: listed?.asin,
+          qty: several ? 1 : Math.max(1, order.units || 1),
+          price: 0,
+        } satisfies DetailedItem
+      }),
+    )
+  }
+
+  if (!index.size) throw new SpApiError('Extrato financeiro sem SKUs por pedido.')
+  return index
+}
+
+async function loadOrderIndex(): Promise<OrderIndex | null> {
+  const key = orderIndexKey()
+  const cached = orderIndexCache.get(key)
+  if (cached && cached.expiresAt > Date.now()) return cached.value
+
+  const inFlight = orderIndexRunning.get(key)
+  if (inFlight) return inFlight
+
+  const promise = (async () => {
+    try {
+      return await buildOrderIndex(key)
+    } catch {
+      return null
+    }
+  })()
+    .then((value) => {
+      orderIndexCache.set(key, {
+        value,
+        expiresAt: Date.now() + (value ? 30 * 60_000 : 90_000),
+      })
+      return value
+    })
+    .finally(() => {
+      if (orderIndexRunning.get(key) === promise) orderIndexRunning.delete(key)
+    })
+
+  orderIndexRunning.set(key, promise)
+  promise.catch(() => undefined)
+  return promise
 }
 
 export async function fetchLive(since: string): Promise<LiveResult> {
@@ -660,8 +788,10 @@ export async function fetchLive(since: string): Promise<LiveResult> {
     .sort((a, b) => (b.purchasedAt > a.purchasedAt ? 1 : -1))
     .slice(0, LIVE_LIMIT)
 
-  for (const order of orders.slice(0, 3)) {
-    const title = await readProductTitle(order.id)
+  let index: OrderIndex | null = null
+  for (const order of orders) {
+    if (itemsUnavailable && !index) index = await loadOrderIndex()
+    const title = (await readOrderItems(order.id))?.[0]?.title ?? titleFrom(index, order.id)
     if (title) order.product = title
   }
 
@@ -722,6 +852,8 @@ export async function fetchOrdersDetailed(since: string): Promise<DetailedResult
     .sort((a, b) => (b.purchasedAt > a.purchasedAt ? 1 : -1))
 
   let enriched = 0
+  let source = 'api'
+
   if (!itemsUnavailable) {
     for (const order of orders.slice(0, DETAIL_ENRICH_LIMIT)) {
       const items = await readOrderItems(order.id)
@@ -735,11 +867,28 @@ export async function fetchOrdersDetailed(since: string): Promise<DetailedResult
     }
   }
 
+  if (itemsUnavailable) {
+    const index = await loadOrderIndex()
+    if (index) {
+      source = 'extrato'
+      for (const order of orders) {
+        if (order.items.length) continue
+        const items = index.get(order.id)
+        if (!items?.length) continue
+        order.items = items
+        enriched += 1
+      }
+    }
+  }
+
   const value: DetailedResult = {
     count: orders.length,
-    detail: itemsUnavailable
-      ? `${orders.length} pedidos · itens detalhados aguardando aprovação da Amazon`
-      : `${orders.length} pedidos desde ${since} · ${enriched} com itens detalhados`,
+    detail:
+      source === 'extrato'
+        ? `${orders.length} pedidos desde ${since} · ${enriched} com itens do extrato e do catálogo`
+        : itemsUnavailable
+          ? `${orders.length} pedidos · itens detalhados aguardando aprovação da Amazon`
+          : `${orders.length} pedidos desde ${since} · ${enriched} com itens detalhados`,
     orders,
     enriched,
     fetchedAt: new Date().toISOString(),
