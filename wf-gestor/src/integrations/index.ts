@@ -3,6 +3,7 @@ export {
   getAppDb,
   getAppDbWriteError,
   loadAppDb,
+  reloadAppDb,
   saveAppState,
   saveSkuInfo,
   useAppDb,

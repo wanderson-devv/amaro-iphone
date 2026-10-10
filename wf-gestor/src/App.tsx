@@ -18,6 +18,7 @@ import FinancePage from './pages/FinancePage'
 import AnalyticsPage from './pages/AnalyticsPage'
 import OperationsPage from './pages/OperationsPage'
 import IntegrationsPage from './pages/IntegrationsPage'
+import SettingsPage from './pages/SettingsPage'
 import LiveToast from './components/LiveToast'
 import { brl } from './data'
 import {
@@ -39,6 +40,7 @@ type View =
   | 'Análises'
   | 'Operação'
   | 'Integrações'
+  | 'Configurações'
 
 const nav: { label: View; icon: typeof LayoutDashboard }[] = [
   { label: 'Visão geral', icon: LayoutDashboard },
@@ -153,6 +155,8 @@ export default function App() {
         return <OperationsPage />
       case 'Integrações':
         return <IntegrationsPage />
+      case 'Configurações':
+        return <SettingsPage />
       default:
         return (
           <DashboardPage
@@ -189,7 +193,7 @@ export default function App() {
         </nav>
 
         <div className="sidebar-bottom">
-          <button>
+          <button className={view === 'Configurações' ? 'active' : ''} onClick={() => setView('Configurações')}>
             <Settings size={18} />
             Configurações
           </button>

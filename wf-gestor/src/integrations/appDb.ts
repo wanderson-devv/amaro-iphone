@@ -171,6 +171,11 @@ export async function loadAppDb() {
   await migrateLegacy()
 }
 
+export async function reloadAppDb() {
+  loaded = false
+  await loadAppDb()
+}
+
 const pendingSaves = new Map<string, SkuInfo>()
 const debounceTimers = new Map<string, number>()
 let flushing = false
