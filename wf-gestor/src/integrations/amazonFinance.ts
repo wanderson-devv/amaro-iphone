@@ -28,7 +28,7 @@ export type FinanceState = {
   updatedAt: number
 }
 
-export type AmazonSkuInfo = { name?: string; cost?: number }
+export type AmazonSkuInfo = { name?: string; cost?: number; tax?: number }
 
 class FinanceError extends Error {
   status: FinanceStatus
@@ -273,7 +273,9 @@ export function enrichSales(
     const meta = usable ? skuInfo[sku] : undefined
     const costUnit = meta?.cost
     const cost = costUnit == null ? 0 : round(costUnit * sale.qty)
-    const net = round(sale.gross + info.refunds - info.taxes - info.commission - info.fees)
+    const taxRate = meta?.tax
+    const taxes = taxRate != null ? round((sale.gross * taxRate) / 100) : info.taxes
+    const net = round(sale.gross + info.refunds - taxes - info.commission - info.fees)
     const temTitulo = Boolean(sale.product) && sale.product !== 'Pedido na Amazon'
 
     return {
@@ -283,7 +285,7 @@ export function enrichSales(
       product: meta?.name ?? (temTitulo ? sale.product : hasSku ? sku : sale.product),
       commission: info.commission,
       fees: info.fees,
-      taxes: info.taxes,
+      taxes,
       cost,
       net,
       profit: round(net - cost),

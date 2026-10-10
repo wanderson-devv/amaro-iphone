@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { config } from './config.js'
 
 export type Backend = 'neon' | 'sqlite'
-export type SkuRecord = { sku: string; name?: string; cost?: number }
+export type SkuRecord = { sku: string; name?: string; cost?: number; tax?: number }
 
 export const STATE = {
   snapshot: 'sync.snapshot',
@@ -36,6 +36,7 @@ sqlite.exec(`
     sku TEXT PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '',
     cost REAL,
+    tax REAL,
     updated_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS app_state (
@@ -45,21 +46,29 @@ sqlite.exec(`
   );
 `)
 
+{
+  const cols = sqlite.prepare('PRAGMA table_info(sku_meta)').all() as { name: string }[]
+  if (!cols.some((col) => col.name === 'tax')) {
+    sqlite.exec('ALTER TABLE sku_meta ADD COLUMN tax REAL')
+  }
+}
+
 let neonReady: Promise<void> | null = null
 
 async function promoteSqliteToNeon() {
   if (!pool) return
-  const skuRows = sqlite.prepare('SELECT sku, name, cost FROM sku_meta').all() as {
+  const skuRows = sqlite.prepare('SELECT sku, name, cost, tax FROM sku_meta').all() as {
     sku: string
     name: string
     cost: number | null
+    tax: number | null
   }[]
   const stateRows = sqlite.prepare('SELECT key, value FROM app_state').all() as { key: string; value: string }[]
   for (const row of skuRows) {
     await pool.query(
-      `INSERT INTO sku_meta (sku, name, cost, updated_at) VALUES ($1, $2, $3, now())
+      `INSERT INTO sku_meta (sku, name, cost, tax, updated_at) VALUES ($1, $2, $3, $4, now())
        ON CONFLICT (sku) DO NOTHING`,
-      [row.sku, row.name || '', row.cost ?? null],
+      [row.sku, row.name || '', row.cost ?? null, row.tax ?? null],
     )
   }
   for (const row of stateRows) {
@@ -81,6 +90,7 @@ function ensureNeon(): Promise<void> {
           sku text PRIMARY KEY,
           name text NOT NULL DEFAULT '',
           cost double precision,
+          tax double precision,
           updated_at timestamptz NOT NULL DEFAULT now()
         );
         CREATE TABLE IF NOT EXISTS app_state (
@@ -89,6 +99,9 @@ function ensureNeon(): Promise<void> {
           updated_at timestamptz NOT NULL DEFAULT now()
         );
       `)
+      .then(() =>
+        pool.query(`ALTER TABLE sku_meta ADD COLUMN IF NOT EXISTS tax double precision`),
+      )
       .then(() => promoteSqliteToNeon())
       .catch((error) => {
         neonReady = null
@@ -101,67 +114,70 @@ function ensureNeon(): Promise<void> {
 export async function listSkus(): Promise<SkuRecord[]> {
   if (pool) {
     await ensureNeon()
-    const { rows } = await pool.query('SELECT sku, name, cost FROM sku_meta ORDER BY sku')
-    return (rows as { sku: string; name: string; cost: number | null }[]).map((row) => ({
+    const { rows } = await pool.query('SELECT sku, name, cost, tax FROM sku_meta ORDER BY sku')
+    return (rows as { sku: string; name: string; cost: number | null; tax: number | null }[]).map((row) => ({
       sku: row.sku,
       name: row.name || undefined,
       cost: row.cost ?? undefined,
+      tax: row.tax ?? undefined,
     }))
   }
-  const rows = sqlite.prepare('SELECT sku, name, cost FROM sku_meta ORDER BY sku').all() as {
+  const rows = sqlite.prepare('SELECT sku, name, cost, tax FROM sku_meta ORDER BY sku').all() as {
     sku: string
     name: string
     cost: number | null
+    tax: number | null
   }[]
   return rows.map((row) => ({
     sku: row.sku,
     name: row.name || undefined,
     cost: row.cost ?? undefined,
+    tax: row.tax ?? undefined,
   }))
 }
 
-export async function replaceSku(sku: string, name: string | undefined, cost: number | null) {
+export async function replaceSku(sku: string, name: string | undefined, cost: number | null, tax: number | null) {
   if (pool) {
     await ensureNeon()
     await pool.query(
-      `INSERT INTO sku_meta (sku, name, cost, updated_at) VALUES ($1, $2, $3, now())
-       ON CONFLICT (sku) DO UPDATE SET name = EXCLUDED.name, cost = EXCLUDED.cost, updated_at = EXCLUDED.updated_at`,
-      [sku, name ?? '', cost],
+      `INSERT INTO sku_meta (sku, name, cost, tax, updated_at) VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (sku) DO UPDATE SET name = EXCLUDED.name, cost = EXCLUDED.cost, tax = EXCLUDED.tax, updated_at = EXCLUDED.updated_at`,
+      [sku, name ?? '', cost, tax],
     )
     return
   }
   sqlite
     .prepare(
-      `INSERT INTO sku_meta (sku, name, cost, updated_at) VALUES (?, ?, ?, ?)
-       ON CONFLICT(sku) DO UPDATE SET name = excluded.name, cost = excluded.cost, updated_at = excluded.updated_at`,
+      `INSERT INTO sku_meta (sku, name, cost, tax, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(sku) DO UPDATE SET name = excluded.name, cost = excluded.cost, tax = excluded.tax, updated_at = excluded.updated_at`,
     )
-    .run(sku, name ?? '', cost, new Date().toISOString())
+    .run(sku, name ?? '', cost, tax, new Date().toISOString())
 }
 
-export async function importSkus(items: { sku: string; name?: string; cost?: number }[]) {
+export async function importSkus(items: { sku: string; name?: string; cost?: number; tax?: number }[]) {
   if (pool) {
     await ensureNeon()
     let inserted = 0
     for (const item of items) {
       if (!item?.sku) continue
       const info = await pool.query(
-        `INSERT INTO sku_meta (sku, name, cost, updated_at) VALUES ($1, $2, $3, now())
+        `INSERT INTO sku_meta (sku, name, cost, tax, updated_at) VALUES ($1, $2, $3, $4, now())
          ON CONFLICT (sku) DO NOTHING`,
-        [item.sku, item.name ?? '', item.cost ?? null],
+        [item.sku, item.name ?? '', item.cost ?? null, item.tax ?? null],
       )
       inserted += info.rowCount ?? 0
     }
     return inserted
   }
   const stmt = sqlite.prepare(
-    `INSERT INTO sku_meta (sku, name, cost, updated_at) VALUES (?, ?, ?, ?)
+    `INSERT INTO sku_meta (sku, name, cost, tax, updated_at) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(sku) DO NOTHING`,
   )
   const now = new Date().toISOString()
   let inserted = 0
   for (const item of items) {
     if (!item?.sku) continue
-    const info = stmt.run(item.sku, item.name ?? '', item.cost ?? null, now)
+    const info = stmt.run(item.sku, item.name ?? '', item.cost ?? null, item.tax ?? null, now)
     inserted += Number(info.changes ?? 0)
   }
   return inserted

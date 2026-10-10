@@ -12,6 +12,7 @@ type SkuRow = {
   revenue: number
   avgPrice: number
   cost: number | null
+  taxRate: number | null
   margin: number | null
   share: number
   cumulative: number
@@ -32,8 +33,11 @@ export default function AnalyticsPage() {
       accumulator += share
       const meta = skuMeta[item.sku]
       const cost = meta?.cost ?? null
+      const taxRate = meta?.tax
       const avgPrice = item.units > 0 ? item.revenue / item.units : 0
-      const margin = cost != null && avgPrice > 0 ? ((avgPrice - cost) / avgPrice) * 100 : null
+      const taxUnit = taxRate != null ? (avgPrice * taxRate) / 100 : 0
+      const margin =
+        cost != null && avgPrice > 0 ? ((avgPrice - taxUnit - cost) / avgPrice) * 100 : null
       const curve: SkuRow['curve'] = accumulator <= 80 ? 'A' : accumulator <= 95 ? 'B' : 'C'
       return {
         sku: item.sku,
@@ -42,6 +46,7 @@ export default function AnalyticsPage() {
         revenue: item.revenue,
         avgPrice,
         cost,
+        taxRate: taxRate ?? null,
         margin,
         share,
         cumulative: accumulator,
@@ -175,6 +180,7 @@ export default function AnalyticsPage() {
                       <th>Unidades</th>
                       <th>Preço médio</th>
                       <th>Custo</th>
+                      <th>Imposto</th>
                       <th>Margem</th>
                     </tr>
                   </thead>
@@ -192,6 +198,7 @@ export default function AnalyticsPage() {
                         <td>{num(product.units)}</td>
                         <td>{brl(product.avgPrice)}</td>
                         <td>{product.cost != null ? brl(product.cost) : '—'}</td>
+                        <td>{product.taxRate != null ? pct(product.taxRate) : '—'}</td>
                         <td
                           className={
                             product.margin == null ? 'muted' : product.margin > 50 ? 'profit' : product.margin < 20 ? 'loss' : ''

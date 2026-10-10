@@ -1,7 +1,7 @@
 import { useEffect, useReducer } from 'react'
 import { readProxyUrl } from './amazon/connector'
 
-export type SkuInfo = { name?: string; cost?: number }
+export type SkuInfo = { name?: string; cost?: number; tax?: number }
 
 export type AppDbState = {
   skus: Record<string, SkuInfo>
@@ -15,7 +15,7 @@ type DbStateResponse = {
   ok?: boolean
   error?: string
   backend?: string
-  skus?: { sku: string; name?: string; cost?: number }[]
+  skus?: { sku: string; name?: string; cost?: number; tax?: number }[]
   snapshot?: Record<string, number> | null
   lastSync?: string | null
   autoSync?: boolean
@@ -105,7 +105,7 @@ function apply(body: DbStateResponse) {
   const skus: Record<string, SkuInfo> = {}
   for (const row of body.skus ?? []) {
     if (!row?.sku) continue
-    skus[row.sku] = { name: row.name, cost: row.cost }
+    skus[row.sku] = { name: row.name, cost: row.cost, tax: row.tax }
   }
   state = {
     skus,
@@ -126,6 +126,7 @@ function readLegacy() {
       sku,
       name: info?.name,
       cost: info?.cost,
+      tax: info?.tax,
     }))
   } catch {
     /* sem dado local aproveitável */
@@ -190,7 +191,7 @@ async function flushPendingSaves() {
       try {
         await requestRetry(`/db/skus/${encodeURIComponent(sku)}`, {
           method: 'PUT',
-          body: JSON.stringify({ name: info.name ?? null, cost: info.cost ?? null }),
+          body: JSON.stringify({ name: info.name ?? null, cost: info.cost ?? null, tax: info.tax ?? null }),
         })
         writeError = null
       } catch (error) {

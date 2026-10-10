@@ -11,41 +11,51 @@ import {
 import type { AmazonSkuInfo } from '../integrations'
 import { PageHeader, Panel, StatTile, Tag } from '../components/ui'
 
-function formatCost(cost: number): string {
-  return String(cost).replace('.', ',')
+function formatNum(value: number): string {
+  return String(value).replace('.', ',')
 }
 
-function CostInput({
+function parseNum(raw: string): number | null {
+  const text = raw.trim().replace(/\s/g, '')
+  if (text === '') return null
+  const lastComma = text.lastIndexOf(',')
+  const lastDot = text.lastIndexOf('.')
+  const normalized =
+    lastComma >= 0 && lastDot >= 0
+      ? lastComma < lastDot
+        ? text.replace(/,/g, '')
+        : text.replace(/\./g, '').replace(',', '.')
+      : text.replace(',', '.')
+  const parsed = Number(normalized)
+  if (Number.isNaN(parsed) || parsed < 0) return null
+  return Math.round(parsed * 100) / 100
+}
+
+function DecimalInput({
   sku,
   meta,
   save,
+  field,
+  placeholder,
 }: {
   sku: string
   meta: AmazonSkuInfo
   save: (sku: string, info: AmazonSkuInfo) => void
+  field: 'cost' | 'tax'
+  placeholder: string
 }) {
   const [draft, setDraft] = useState<string | null>(null)
-  const committed = meta.cost != null ? formatCost(meta.cost) : ''
+  const committed = meta[field] != null ? formatNum(meta[field] as number) : ''
 
   const onChange = (raw: string) => {
     setDraft(raw)
-    const text = raw.trim().replace(/\s/g, '')
-    if (text === '') {
-      if (meta.cost != null) save(sku, { ...meta, cost: undefined })
+    const parsed = parseNum(raw)
+    if (raw.trim() === '') {
+      if (meta[field] != null) save(sku, { ...meta, [field]: undefined })
       return
     }
-    const lastComma = text.lastIndexOf(',')
-    const lastDot = text.lastIndexOf('.')
-    const normalized =
-      lastComma >= 0 && lastDot >= 0
-        ? lastComma < lastDot
-          ? text.replace(/,/g, '')
-          : text.replace(/\./g, '').replace(',', '.')
-        : text.replace(',', '.')
-    const parsed = Number(normalized)
-    if (Number.isNaN(parsed) || parsed < 0) return
-    const rounded = Math.round(parsed * 100) / 100
-    if (rounded !== meta.cost) save(sku, { ...meta, cost: rounded })
+    if (parsed == null) return
+    if (parsed !== meta[field]) save(sku, { ...meta, [field]: parsed })
   }
 
   return (
@@ -53,7 +63,7 @@ function CostInput({
       className="sku-input short"
       inputMode="decimal"
       value={draft ?? committed}
-      placeholder="0,00"
+      placeholder={placeholder}
       onChange={(event) => onChange(event.target.value)}
       onBlur={() => setDraft(null)}
     />
@@ -96,6 +106,7 @@ export default function CatalogPage() {
   const totalUnits = rows.reduce((sum, row) => sum + row.units, 0)
   const totalRevenue = rows.reduce((sum, row) => sum + row.revenue, 0)
   const comCusto = rows.filter((row) => skuMeta[row.sku]?.cost != null).length
+  const comImposto = rows.filter((row) => skuMeta[row.sku]?.tax != null).length
   const loading = listings.status === 'inicial' && finance.status === 'inicial'
 
   return (
@@ -103,7 +114,7 @@ export default function CatalogPage() {
       <PageHeader
         eyebrow="Gerenciamento"
         title="Catálogo e associações"
-        description="Todos os anúncios da sua conta Amazon — ativos e inativos — vindos da SP-API, com as vendas do extrato, custo e nome informados por você."
+        description="Todos os anúncios da sua conta Amazon — ativos e inativos — vindos da SP-API, com as vendas do extrato, nome, custo e alíquota de imposto informados por você."
       />
 
       <section className="metrics">
@@ -121,7 +132,7 @@ export default function CatalogPage() {
         <StatTile
           label="Com custo cadastrado"
           value={`${comCusto}/${rows.length}`}
-          hint="permite calcular margem"
+          hint={`${comImposto} com imposto definido`}
           tone={comCusto === rows.length && rows.length > 0 ? 'positive' : 'attention'}
         />
       </section>
@@ -154,6 +165,7 @@ export default function CatalogPage() {
                   <th>Receita no extrato</th>
                   <th>Nome do produto</th>
                   <th>Custo unitário</th>
+                  <th>Imposto %</th>
                   <th>Situação</th>
                 </tr>
               </thead>
@@ -182,7 +194,10 @@ export default function CatalogPage() {
                         />
                       </td>
                       <td>
-                        <CostInput sku={row.sku} meta={meta} save={save} />
+                        <DecimalInput sku={row.sku} meta={meta} save={save} field="cost" placeholder="0,00" />
+                      </td>
+                      <td>
+                        <DecimalInput sku={row.sku} meta={meta} save={save} field="tax" placeholder="0,0" />
                       </td>
                       <td>{cost != null ? <Tag value="Conciliado" /> : <Tag value="Pendente" />}</td>
                     </tr>
@@ -193,8 +208,9 @@ export default function CatalogPage() {
           </div>
         )}
         <p className="breakdown-note">
-          Nome e custo ficam salvos no banco {db.backend === 'neon' ? 'Neon (Postgres na nuvem)' : 'local do proxy (SQLite)'}{' '}
-          e alimentam Lucro e Margem em todas as telas — de qualquer dispositivo.
+          Nome, custo e alíquota de imposto (%) ficam salvos no banco {db.backend === 'neon' ? 'Neon (Postgres na nuvem)' : 'local do proxy (SQLite)'}{' '}
+          e alimentam Lucro e Margem em todas as telas — de qualquer dispositivo. A alíquota informada substitui o imposto
+          do extrato no cálculo do líquido.
         </p>
         {dbError && (
           <p className="breakdown-note is-error">
@@ -205,7 +221,8 @@ export default function CatalogPage() {
       </Panel>
 
       <section className="footnote">
-        Cobertura de custo: {rows.length ? pct((comCusto / rows.length) * 100) : pct(0)} dos anúncios listados.
+        Cobertura de custo: {rows.length ? pct((comCusto / rows.length) * 100) : pct(0)} · imposto definido em{' '}
+        {rows.length ? pct((comImposto / rows.length) * 100) : pct(0)} dos anúncios listados.
       </section>
     </>
   )

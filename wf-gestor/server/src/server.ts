@@ -49,7 +49,7 @@ app.get('/db/state', async () => ({
   autoSync: await readBoolState(STATE.autoSync, true),
 }))
 
-app.put<{ Params: { sku: string }; Body: { name?: string | null; cost?: number | null } }>(
+app.put<{ Params: { sku: string }; Body: { name?: string | null; cost?: number | null; tax?: number | null } }>(
   '/db/skus/:sku',
   async (request, reply) => {
     const sku = decodeURIComponent(request.params.sku ?? '').trim()
@@ -57,8 +57,9 @@ app.put<{ Params: { sku: string }; Body: { name?: string | null; cost?: number |
     const body = request.body ?? {}
     const name = typeof body.name === 'string' ? body.name.trim() : ''
     const cost = typeof body.cost === 'number' && Number.isFinite(body.cost) ? body.cost : null
+    const tax = typeof body.tax === 'number' && Number.isFinite(body.tax) ? body.tax : null
     try {
-      await replaceSku(sku, name, cost)
+      await replaceSku(sku, name, cost, tax)
     } catch (error) {
       request.log.error(error)
       return reply
@@ -92,7 +93,7 @@ app.put<{
   return { ok: true }
 })
 
-app.post<{ Body: { skus?: { sku: string; name?: string; cost?: number }[]; state?: Record<string, string> } }>(
+app.post<{ Body: { skus?: { sku: string; name?: string; cost?: number; tax?: number }[]; state?: Record<string, string> } }>(
   '/db/import',
   async (request) => {
     const body = request.body ?? {}
