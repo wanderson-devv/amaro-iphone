@@ -114,6 +114,98 @@ export async function fetchAmazonFinance(
   }
 }
 
+export type ListingItem = { sku: string; title?: string; asin?: string; active: boolean }
+
+export type ListingsState = {
+  status: FinanceStatus
+  message: string
+  hint?: string
+  items: ListingItem[]
+  updatedAt: number
+}
+
+export function useAmazonListings(): ListingsState & { refresh: () => void } {
+  const [state, setState] = useState<ListingsState>({
+    status: 'inicial',
+    message: 'Lendo anúncios da Amazon…',
+    items: [],
+    updatedAt: 0,
+  })
+  const requestId = useRef(0)
+
+  const load = useCallback(async () => {
+    const id = (requestId.current += 1)
+    const base = readProxyUrl()
+    if (!base) {
+      setState((prev) => ({
+        ...prev,
+        status: 'sem-proxy',
+        message: 'Proxy SP-API não configurado.',
+        hint: proxyHint(),
+        updatedAt: Date.now(),
+      }))
+      return
+    }
+
+    try {
+      const response = await fetch(`${base}/amazon/listings`, { headers: { Accept: 'application/json' } })
+      const body = (await response.json().catch(() => ({}))) as {
+        ok?: boolean
+        count?: number
+        detail?: string
+        items?: ListingItem[]
+        error?: string
+      }
+
+      if (response.status === 503) {
+        throw new FinanceError('aguardando-credenciais', body.error ?? 'Proxy sem credenciais da Amazon.', body.detail)
+      }
+      if (!response.ok) {
+        throw new FinanceError('erro', body.error ?? `HTTP ${response.status}.`, body.detail)
+      }
+
+      const detail = body.detail ?? `${body.count ?? 0} anúncios na loja`
+      if (id === requestId.current) {
+        setState({
+          status: 'live',
+          message: detail,
+          items: body.items ?? [],
+          updatedAt: Date.now(),
+        })
+      }
+    } catch (error) {
+      const failure = error instanceof FinanceError ? error : new FinanceError('erro', (error as Error).message)
+      if (id === requestId.current) {
+        setState((prev) => ({
+          ...prev,
+          status: failure.status,
+          message: failure.message,
+          hint: failure.hint,
+          updatedAt: Date.now(),
+        }))
+      }
+    }
+  }, [])
+
+  const refresh = useCallback(() => {
+    void load()
+  }, [load])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  useEffect(() => {
+    if (state.status !== 'erro') return
+    const retry = setTimeout(() => {
+      void load()
+    }, 45_000)
+    return () => clearTimeout(retry)
+  }, [state.status, state.updatedAt, load])
+
+  return { ...state, refresh }
+}
+
 export function useAmazonFinance(since: string = ALL_ORDERS_SINCE): FinanceState & { refresh: () => void } {
   const [state, setState] = useState<FinanceState>({
     status: 'inicial',
@@ -177,7 +269,8 @@ export function enrichSales(
     const rawSku = info.skus[0] ?? ''
     const hasSku = Boolean(rawSku) && rawSku !== '-' && rawSku !== '—'
     const sku = hasSku ? rawSku : sale.sku
-    const meta = hasSku ? skuInfo[sku] : undefined
+    const usable = Boolean(sku) && sku !== '-' && sku !== '—'
+    const meta = usable ? skuInfo[sku] : undefined
     const costUnit = meta?.cost
     const cost = costUnit == null ? 0 : round(costUnit * sale.qty)
     const net = round(sale.gross + info.refunds - info.taxes - info.commission - info.fees)

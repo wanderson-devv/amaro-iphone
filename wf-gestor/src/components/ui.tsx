@@ -109,7 +109,7 @@ export function StatTile({
 export function Tag({ value }: { value: string }) {
   const tone = ['Recebido', 'Conferido', 'Conectado', 'Aceita', 'Concluída', 'Ativo', 'Conciliado'].includes(value)
     ? 'tag-ok'
-    : ['Em disputa', 'Divergente', 'Pendente', 'Desconectado', 'Não necessária'].includes(value)
+    : ['Em disputa', 'Divergente', 'Pendente', 'Desconectado', 'Não necessária', 'Inativo'].includes(value)
       ? 'tag-warn'
       : value === 'Devolvido'
         ? 'tag-bad'

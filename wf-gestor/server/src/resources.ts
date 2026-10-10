@@ -4,7 +4,9 @@ import { SpApiError, spGet } from './spapi.js'
 
 export type ResourceKey = 'orders' | 'settlements' | 'inventory' | 'listings' | 'finance'
 
-export type ResourceResult = { count: number; detail: string }
+export type ListingItem = { sku: string; title?: string; asin?: string; active: boolean }
+
+export type ResourceResult = { count: number; detail: string; items?: ListingItem[] }
 
 export const resourceKeys: ResourceKey[] = ['orders', 'settlements', 'inventory', 'listings', 'finance']
 
@@ -113,27 +115,35 @@ async function fetchListings(): Promise<ResourceResult> {
     const items = payload.items ?? []
 
     listingCatalog.clear()
+    const list: ListingItem[] = []
     let active = 0
 
     for (const item of items) {
       const summary = item.summaries?.[0]
       const sku = item.sku ?? ''
+      const status = summary?.status ?? []
+      const isActive = status.includes('BUYABLE') || status.includes('DISCOVERABLE')
       if (sku) {
         listingCatalog.set(sku, {
           title: summary?.itemName || undefined,
           asin: summary?.asin || undefined,
         })
+        list.push({
+          sku,
+          title: summary?.itemName || undefined,
+          asin: summary?.asin || undefined,
+          active: isActive,
+        })
       }
-      const status = summary?.status ?? []
-      if (!status.length || status.includes('BUYABLE') || status.includes('DISCOVERABLE')) {
-        active += 1
-      }
+      if (isActive) active += 1
     }
 
+    const total = list.length
     return {
-      count: active,
-      detail: items.length
-        ? `${active} anúncios ativos na loja · tempo real`
+      count: total,
+      items: list,
+      detail: total
+        ? `${active} ativos · ${total - active} inativos · todos os anúncios da loja · tempo real`
         : 'nenhum anúncio retornado',
     }
   } catch (error) {
@@ -165,6 +175,7 @@ async function listingsFromReport(): Promise<ResourceResult> {
   const report = await runReport(LISTINGS_REPORT)
   listingCatalog.clear()
 
+  const list: ListingItem[] = []
   let active = 0
   for (const row of report.rows) {
     const fields = normalized(row)
@@ -172,15 +183,22 @@ async function listingsFromReport(): Promise<ResourceResult> {
     const title = pick(fields, ['itemname', 'title', 'productname'])
     const asin = pick(fields, ['asin1', 'asin'])
     const status = pick(fields, ['listingstatus', 'status']).toUpperCase()
+    const addDelete = pick(fields, ['add-delete']).toLowerCase()
+    const isActive = status ? status === 'ACTIVE' : addDelete !== 'd'
 
-    if (sku) listingCatalog.set(sku, { title: title || undefined, asin: asin || undefined })
-    if (!status || status === 'ACTIVE') active += 1
+    if (sku) {
+      listingCatalog.set(sku, { title: title || undefined, asin: asin || undefined })
+      list.push({ sku, title: title || undefined, asin: asin || undefined, active: isActive })
+    }
+    if (isActive) active += 1
   }
 
+  const total = list.length
   return {
-    count: active,
-    detail: report.rows.length
-      ? `${active} anúncios ativos na loja · lidos do relatório da Amazon`
+    count: total,
+    items: list,
+    detail: total
+      ? `${active} ativos · ${total - active} inativos · todos os anúncios · lidos do relatório da Amazon`
       : 'nenhum anúncio no relatório da Amazon',
   }
 }

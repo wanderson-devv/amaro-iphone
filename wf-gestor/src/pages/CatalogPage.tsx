@@ -1,56 +1,155 @@
+import { useState } from 'react'
 import { brl, num, pct } from '../data'
-import { FINANCE_SINCE, useAmazonFinance, useAmazonSkus, useAppDb, useAppDbWriteError } from '../integrations'
+import {
+  FINANCE_SINCE,
+  useAmazonFinance,
+  useAmazonListings,
+  useAmazonSkus,
+  useAppDb,
+  useAppDbWriteError,
+} from '../integrations'
+import type { AmazonSkuInfo } from '../integrations'
 import { PageHeader, Panel, StatTile, Tag } from '../components/ui'
+
+function formatCost(cost: number): string {
+  return String(cost).replace('.', ',')
+}
+
+function CostInput({
+  sku,
+  meta,
+  save,
+}: {
+  sku: string
+  meta: AmazonSkuInfo
+  save: (sku: string, info: AmazonSkuInfo) => void
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const committed = meta.cost != null ? formatCost(meta.cost) : ''
+
+  const onChange = (raw: string) => {
+    setDraft(raw)
+    const text = raw.trim().replace(/\s/g, '')
+    if (text === '') {
+      if (meta.cost != null) save(sku, { ...meta, cost: undefined })
+      return
+    }
+    const lastComma = text.lastIndexOf(',')
+    const lastDot = text.lastIndexOf('.')
+    const normalized =
+      lastComma >= 0 && lastDot >= 0
+        ? lastComma < lastDot
+          ? text.replace(/,/g, '')
+          : text.replace(/\./g, '').replace(',', '.')
+        : text.replace(',', '.')
+    const parsed = Number(normalized)
+    if (Number.isNaN(parsed) || parsed < 0) return
+    const rounded = Math.round(parsed * 100) / 100
+    if (rounded !== meta.cost) save(sku, { ...meta, cost: rounded })
+  }
+
+  return (
+    <input
+      className="sku-input short"
+      inputMode="decimal"
+      value={draft ?? committed}
+      placeholder="0,00"
+      onChange={(event) => onChange(event.target.value)}
+      onBlur={() => setDraft(null)}
+    />
+  )
+}
 
 export default function CatalogPage() {
   const finance = useAmazonFinance(FINANCE_SINCE)
+  const listings = useAmazonListings()
   const { skus: skuMeta, save } = useAmazonSkus()
   const dbError = useAppDbWriteError()
   const db = useAppDb()
 
-  const amazonSkus = finance.skus
-  const totalUnits = amazonSkus.reduce((sum, item) => sum + item.units, 0)
-  const totalRevenue = amazonSkus.reduce((sum, item) => sum + item.revenue, 0)
-  const comCusto = amazonSkus.filter((item) => skuMeta[item.sku]?.cost != null).length
+  const salesBySku = new Map(finance.skus.map((item) => [item.sku, item]))
+  const listedSkus = new Set(listings.items.map((item) => item.sku))
+
+  const rows = [
+    ...listings.items.map((item) => ({
+      sku: item.sku,
+      title: item.title,
+      active: item.active as boolean | undefined,
+      units: salesBySku.get(item.sku)?.units ?? 0,
+      revenue: salesBySku.get(item.sku)?.revenue ?? 0,
+    })),
+    ...finance.skus
+      .filter((item) => !listedSkus.has(item.sku))
+      .map((item) => ({
+        sku: item.sku,
+        title: undefined as string | undefined,
+        active: undefined as boolean | undefined,
+        units: item.units,
+        revenue: item.revenue,
+      })),
+  ].sort(
+    (a, b) => Number(b.active === true) - Number(a.active === true) || a.sku.localeCompare(b.sku),
+  )
+
+  const activeCount = listings.items.filter((item) => item.active).length
+  const inactiveCount = listings.items.length - activeCount
+  const totalUnits = rows.reduce((sum, row) => sum + row.units, 0)
+  const totalRevenue = rows.reduce((sum, row) => sum + row.revenue, 0)
+  const comCusto = rows.filter((row) => skuMeta[row.sku]?.cost != null).length
+  const loading = listings.status === 'inicial' && finance.status === 'inicial'
 
   return (
     <>
       <PageHeader
         eyebrow="Gerenciamento"
         title="Catálogo e associações"
-        description="SKUs reais encontrados no extrato financeiro da Amazon, com custo e nome informados por você."
+        description="Todos os anúncios da sua conta Amazon — ativos e inativos — vindos da SP-API, com as vendas do extrato, custo e nome informados por você."
       />
 
       <section className="metrics">
-        <StatTile label="SKUs no extrato" value={num(amazonSkus.length)} hint="vindos da Amazon" />
+        <StatTile
+          label="Anúncios na conta"
+          value={num(listings.items.length)}
+          hint={
+            listings.status === 'live'
+              ? `${activeCount} ativos · ${inactiveCount} inativos`
+              : listings.message
+          }
+        />
         <StatTile label="Unidades vendidas" value={num(totalUnits)} hint="no período do extrato" />
         <StatTile label="Receita no extrato" value={brl(totalRevenue)} hint="bruto por SKU" />
         <StatTile
           label="Com custo cadastrado"
-          value={`${comCusto}/${amazonSkus.length}`}
+          value={`${comCusto}/${rows.length}`}
           hint="permite calcular margem"
-          tone={comCusto === amazonSkus.length && amazonSkus.length > 0 ? 'positive' : 'attention'}
+          tone={comCusto === rows.length && rows.length > 0 ? 'positive' : 'attention'}
         />
       </section>
 
       <Panel
-        title="SKUs da Amazon"
-        hint={finance.status === 'live' ? 'Vindos do extrato financeiro real' : 'Extrato financeiro'}
+        title="Anúncios da Amazon"
+        hint={listings.status === 'live' ? listings.message : 'Anúncios e extrato financeiro'}
         className="sales-panel"
       >
-        {finance.status === 'inicial' && <p className="breakdown-note">Lendo o extrato financeiro da Amazon…</p>}
-        {finance.status !== 'inicial' && amazonSkus.length === 0 && (
+        {loading && <p className="breakdown-note">Lendo os anúncios da Amazon…</p>}
+        {!loading && rows.length === 0 && (
           <p className="breakdown-note">
-            {finance.message}
-            {finance.hint ? ` · ${finance.hint}` : ''}
+            {listings.status === 'erro' ? listings.message : finance.message}
+            {(listings.hint ?? finance.hint) ? ` · ${listings.hint ?? finance.hint}` : ''}
           </p>
         )}
-        {amazonSkus.length > 0 && (
+        {listings.status === 'erro' && rows.length > 0 && (
+          <p className="breakdown-note is-error">
+            Falha ao ler os anúncios: {listings.message} — mostrando só o extrato financeiro.
+          </p>
+        )}
+        {rows.length > 0 && (
           <div className="table-scroll">
             <table className="wide">
               <thead>
                 <tr>
                   <th>SKU Amazon</th>
+                  <th>Anúncio</th>
                   <th>Unidades</th>
                   <th>Receita no extrato</th>
                   <th>Nome do produto</th>
@@ -59,36 +158,31 @@ export default function CatalogPage() {
                 </tr>
               </thead>
               <tbody>
-                {amazonSkus.map((item) => {
-                  const meta = skuMeta[item.sku] ?? {}
+                {rows.map((row) => {
+                  const meta = skuMeta[row.sku] ?? {}
                   const cost = meta.cost
                   return (
-                    <tr key={item.sku}>
-                      <td className="order">{item.sku}</td>
-                      <td>{num(item.units)}</td>
-                      <td>{brl(item.revenue)}</td>
+                    <tr key={row.sku}>
+                      <td className="order">{row.sku}</td>
+                      <td>
+                        {row.active === undefined ? (
+                          '—'
+                        ) : (
+                          <Tag value={row.active ? 'Ativo' : 'Inativo'} />
+                        )}
+                      </td>
+                      <td>{num(row.units)}</td>
+                      <td>{brl(row.revenue)}</td>
                       <td>
                         <input
                           className="sku-input"
                           value={meta.name ?? ''}
-                          placeholder="nome do produto"
-                          onChange={(event) => save(item.sku, { ...meta, name: event.target.value || undefined })}
+                          placeholder={row.title ?? 'nome do produto'}
+                          onChange={(event) => save(row.sku, { ...meta, name: event.target.value || undefined })}
                         />
                       </td>
                       <td>
-                        <input
-                          className="sku-input short"
-                          inputMode="decimal"
-                          value={meta.cost ?? ''}
-                          placeholder="0,00"
-                          onChange={(event) => {
-                            const parsed = Number(event.target.value.replace(',', '.'))
-                            save(item.sku, {
-                              ...meta,
-                              cost: event.target.value === '' || Number.isNaN(parsed) ? undefined : parsed,
-                            })
-                          }}
-                        />
+                        <CostInput sku={row.sku} meta={meta} save={save} />
                       </td>
                       <td>{cost != null ? <Tag value="Conciliado" /> : <Tag value="Pendente" />}</td>
                     </tr>
@@ -111,7 +205,7 @@ export default function CatalogPage() {
       </Panel>
 
       <section className="footnote">
-        Cobertura de custo: {amazonSkus.length ? pct((comCusto / amazonSkus.length) * 100) : pct(0)} dos SKUs com extrato.
+        Cobertura de custo: {rows.length ? pct((comCusto / rows.length) * 100) : pct(0)} dos anúncios listados.
       </section>
     </>
   )

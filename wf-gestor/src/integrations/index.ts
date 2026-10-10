@@ -49,7 +49,8 @@ export {
   enrichSales,
   fetchAmazonFinance,
   useAmazonFinance,
+  useAmazonListings,
   useAmazonSkus,
   FINANCE_SINCE,
 } from './amazonFinance'
-export type { AmazonSkuInfo, FinanceAd, FinanceOrder, FinanceState, FinanceStatus } from './amazonFinance'
+export type { AmazonSkuInfo, FinanceAd, FinanceOrder, FinanceState, FinanceStatus, ListingsState, ListingItem } from './amazonFinance'
