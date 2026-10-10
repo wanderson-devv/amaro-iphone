@@ -13,10 +13,9 @@ export class SpApiError extends Error {
 type Cache = { token: string; expiresAt: number }
 
 let cache: Cache | null = null
+let inflight: Promise<string> | null = null
 
-export async function getAccessToken(): Promise<string> {
-  if (cache && cache.expiresAt > Date.now() + 60_000) return cache.token
-
+async function refreshToken(): Promise<string> {
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: config.refreshToken,
@@ -44,6 +43,15 @@ export async function getAccessToken(): Promise<string> {
     expiresAt: Date.now() + Number(payload.expires_in ?? 3600) * 1000,
   }
   return cache.token
+}
+
+export async function getAccessToken(): Promise<string> {
+  if (cache && cache.expiresAt > Date.now() + 60_000) return cache.token
+  if (inflight) return inflight
+  inflight = refreshToken().finally(() => {
+    inflight = null
+  })
+  return inflight
 }
 
 const amzDate = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')

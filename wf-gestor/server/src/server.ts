@@ -57,23 +57,37 @@ app.put<{ Params: { sku: string }; Body: { name?: string | null; cost?: number |
     const body = request.body ?? {}
     const name = typeof body.name === 'string' ? body.name.trim() : ''
     const cost = typeof body.cost === 'number' && Number.isFinite(body.cost) ? body.cost : null
-    await replaceSku(sku, name, cost)
+    try {
+      await replaceSku(sku, name, cost)
+    } catch (error) {
+      request.log.error(error)
+      return reply
+        .code(502)
+        .send({ ok: false, error: 'Banco do proxy indisponível no momento.', detail: 'Neon/SQLite não respondeu; tente de novo em instantes.' })
+    }
     return { ok: true, sku }
   },
 )
 
 app.put<{
   Body: { snapshot?: Record<string, number> | null; lastSync?: string | null; autoSync?: boolean }
-}>('/db/state', async (request) => {
+}>('/db/state', async (request, reply) => {
   const body = request.body ?? {}
-  if (body.snapshot !== undefined) {
-    await writeState(STATE.snapshot, JSON.stringify(body.snapshot ?? null))
-  }
-  if (body.lastSync !== undefined) {
-    await writeState(STATE.lastSync, body.lastSync ?? '')
-  }
-  if (body.autoSync !== undefined) {
-    await writeState(STATE.autoSync, body.autoSync ? '1' : '0')
+  try {
+    if (body.snapshot !== undefined) {
+      await writeState(STATE.snapshot, JSON.stringify(body.snapshot ?? null))
+    }
+    if (body.lastSync !== undefined) {
+      await writeState(STATE.lastSync, body.lastSync ?? '')
+    }
+    if (body.autoSync !== undefined) {
+      await writeState(STATE.autoSync, body.autoSync ? '1' : '0')
+    }
+  } catch (error) {
+    request.log.error(error)
+    return reply
+      .code(502)
+      .send({ ok: false, error: 'Banco do proxy indisponível no momento.', detail: 'Neon/SQLite não respondeu; tente de novo em instantes.' })
   }
   return { ok: true }
 })

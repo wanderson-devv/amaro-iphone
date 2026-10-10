@@ -17,7 +17,13 @@ export const STATE = {
 const neonUrl = config.neonDatabaseUrl.trim()
 export const backend: Backend = neonUrl ? 'neon' : 'sqlite'
 
-const pool = neonUrl ? new pg.Pool({ connectionString: neonUrl, max: 4, ssl: { rejectUnauthorized: false } }) : null
+const pool = neonUrl
+  ? new pg.Pool({ connectionString: neonUrl, max: 4, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 8000 })
+  : null
+
+pool?.on('error', (error) => {
+  console.error('[db] conexão Neon ociosa falhou (seguimos tentando):', error.message)
+})
 
 const here = dirname(fileURLToPath(import.meta.url))
 const dataDir = resolve(here, '../data')

@@ -46,21 +46,59 @@ export function subscribeAppDb(listener: () => void) {
 export const getAppDb = (): AppDbState => state
 export const getAppDbWriteError = (): string | null => writeError
 
+const SAVE_DEBOUNCE_MS = 300
+const RETRY_ATTEMPTS = 3
+const REQUEST_TIMEOUT_MS = 10_000
+
+function isNetworkError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : ''
+  return error instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(message)
+}
+
+function friendly(error: unknown): string {
+  if (isNetworkError(error)) {
+    return 'Proxy indisponível (offline ou reiniciando) — os valores seguem salvos aqui e serão reenviados sozinhos.'
+  }
+  const message = error instanceof Error ? error.message : ''
+  return message || 'Falha ao salvar no banco do proxy.'
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const base = readProxyUrl()
-  const response = await fetch(`${base}${path}`, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(init?.headers ?? {}),
-    },
-  })
-  const body = (await response.json().catch(() => ({}))) as T
-  if (!response.ok) {
-    throw new Error((body as { error?: string }).error ?? `HTTP ${response.status}`)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  try {
+    const response = await fetch(`${base}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(init?.headers ?? {}),
+      },
+    })
+    const body = (await response.json().catch(() => ({}))) as T
+    if (!response.ok) {
+      throw new Error((body as { error?: string }).error ?? `HTTP ${response.status}`)
+    }
+    return body
+  } finally {
+    clearTimeout(timer)
   }
-  return body
+}
+
+async function requestRetry<T>(path: string, init?: RequestInit): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      return await request<T>(path, init)
+    } catch (error) {
+      lastError = error
+      if (!isNetworkError(error) || attempt === RETRY_ATTEMPTS - 1) throw error
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)))
+    }
+  }
+  throw lastError
 }
 
 function apply(body: DbStateResponse) {
@@ -125,26 +163,70 @@ export async function loadAppDb() {
   if (loaded) return
   loaded = true
   try {
-    apply(await request<DbStateResponse>('/db/state'))
+    apply(await requestRetry<DbStateResponse>('/db/state'))
   } catch {
     /* proxy off — estado vazio até ele responder */
   }
   await migrateLegacy()
 }
 
-export async function saveSkuInfo(sku: string, info: SkuInfo) {
+const pendingSaves = new Map<string, SkuInfo>()
+const debounceTimers = new Map<string, number>()
+let flushing = false
+
+async function flushPendingSaves() {
+  if (flushing) return
+  flushing = true
+  try {
+    for (;;) {
+      const sku = [...pendingSaves.keys()].find((key) => !debounceTimers.has(key))
+      if (!sku) break
+      const info = pendingSaves.get(sku)
+      if (!info) {
+        pendingSaves.delete(sku)
+        continue
+      }
+      pendingSaves.delete(sku)
+      try {
+        await requestRetry(`/db/skus/${encodeURIComponent(sku)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ name: info.name ?? null, cost: info.cost ?? null }),
+        })
+        writeError = null
+      } catch (error) {
+        if (!pendingSaves.has(sku)) pendingSaves.set(sku, info)
+        writeError = friendly(error)
+        break
+      }
+    }
+  } finally {
+    flushing = false
+    emit()
+  }
+}
+
+export function saveSkuInfo(sku: string, info: SkuInfo) {
   state = { ...state, skus: { ...state.skus, [sku]: info } }
   emit()
-  try {
-    await request(`/db/skus/${encodeURIComponent(sku)}`, {
-      method: 'PUT',
-      body: JSON.stringify({ name: info.name ?? null, cost: info.cost ?? null }),
-    })
-    writeError = null
-  } catch (error) {
-    writeError = error instanceof Error ? error.message : 'Falha ao salvar no banco do proxy.'
-  }
-  emit()
+  pendingSaves.set(sku, info)
+  const existing = debounceTimers.get(sku)
+  if (existing !== undefined) window.clearTimeout(existing)
+  debounceTimers.set(
+    sku,
+    window.setTimeout(() => {
+      debounceTimers.delete(sku)
+      void flushPendingSaves()
+    }, SAVE_DEBOUNCE_MS),
+  )
+}
+
+if (typeof window !== 'undefined') {
+  window.setInterval(() => {
+    if (pendingSaves.size) void flushPendingSaves()
+  }, 20_000)
+  window.addEventListener('online', () => {
+    if (pendingSaves.size) void flushPendingSaves()
+  })
 }
 
 export async function saveAppState(patch: {
@@ -159,10 +241,10 @@ export async function saveAppState(patch: {
   if (patch.lastSync !== undefined) body.lastSync = patch.lastSync
   if (patch.autoSync !== undefined) body.autoSync = patch.autoSync
   try {
-    await request('/db/state', { method: 'PUT', body: JSON.stringify(body) })
+    await requestRetry('/db/state', { method: 'PUT', body: JSON.stringify(body) })
     writeError = null
   } catch (error) {
-    writeError = error instanceof Error ? error.message : 'Falha ao salvar no banco do proxy.'
+    writeError = friendly(error)
   }
   emit()
 }
