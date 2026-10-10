@@ -3,6 +3,9 @@ import type { Sale } from '../data'
 import { proxyHint, readProxyUrl } from './amazon/connector'
 import { ALL_ORDERS_SINCE } from './amazonSales'
 import { saveSkuInfo, useAppDb } from './appDb'
+import { cacheGet, cacheSet } from './cache'
+
+const DATA_CACHE_MS = 10 * 60_000
 
 export type FinanceOrder = {
   skus: string[]
@@ -124,55 +127,57 @@ export type ListingsState = {
   updatedAt: number
 }
 
+export async function fetchAmazonListings(): Promise<ListingsState> {
+  const base = readProxyUrl()
+  if (!base) {
+    return {
+      status: 'sem-proxy',
+      message: 'Proxy SP-API não configurado.',
+      hint: proxyHint(),
+      items: [],
+      updatedAt: Date.now(),
+    }
+  }
+
+  const response = await fetch(`${base}/amazon/listings`, { headers: { Accept: 'application/json' } })
+  const body = (await response.json().catch(() => ({}))) as {
+    ok?: boolean
+    count?: number
+    detail?: string
+    items?: ListingItem[]
+    error?: string
+  }
+
+  if (response.status === 503) {
+    throw new FinanceError('aguardando-credenciais', body.error ?? 'Proxy sem credenciais da Amazon.', body.detail)
+  }
+  if (!response.ok) {
+    throw new FinanceError('erro', body.error ?? `HTTP ${response.status}.`, body.detail)
+  }
+
+  return {
+    status: 'live',
+    message: body.detail ?? `${body.count ?? 0} anúncios na loja`,
+    items: body.items ?? [],
+    updatedAt: Date.now(),
+  }
+}
+
 export function useAmazonListings(): ListingsState & { refresh: () => void } {
-  const [state, setState] = useState<ListingsState>({
-    status: 'inicial',
-    message: 'Lendo anúncios da Amazon…',
-    items: [],
-    updatedAt: 0,
+  const key = 'listings'
+  const [state, setState] = useState<ListingsState>(() => {
+    const cached = cacheGet<ListingsState>(key, DATA_CACHE_MS)
+    return cached ?? { status: 'inicial', message: 'Lendo anúncios da Amazon…', items: [], updatedAt: 0 }
   })
   const requestId = useRef(0)
 
   const load = useCallback(async () => {
     const id = (requestId.current += 1)
-    const base = readProxyUrl()
-    if (!base) {
-      setState((prev) => ({
-        ...prev,
-        status: 'sem-proxy',
-        message: 'Proxy SP-API não configurado.',
-        hint: proxyHint(),
-        updatedAt: Date.now(),
-      }))
-      return
-    }
 
     try {
-      const response = await fetch(`${base}/amazon/listings`, { headers: { Accept: 'application/json' } })
-      const body = (await response.json().catch(() => ({}))) as {
-        ok?: boolean
-        count?: number
-        detail?: string
-        items?: ListingItem[]
-        error?: string
-      }
-
-      if (response.status === 503) {
-        throw new FinanceError('aguardando-credenciais', body.error ?? 'Proxy sem credenciais da Amazon.', body.detail)
-      }
-      if (!response.ok) {
-        throw new FinanceError('erro', body.error ?? `HTTP ${response.status}.`, body.detail)
-      }
-
-      const detail = body.detail ?? `${body.count ?? 0} anúncios na loja`
-      if (id === requestId.current) {
-        setState({
-          status: 'live',
-          message: detail,
-          items: body.items ?? [],
-          updatedAt: Date.now(),
-        })
-      }
+      const next = await fetchAmazonListings()
+      if (next.status === 'live') cacheSet(key, next)
+      if (id === requestId.current) setState(next)
     } catch (error) {
       const failure = error instanceof FinanceError ? error : new FinanceError('erro', (error as Error).message)
       if (id === requestId.current) {
@@ -185,7 +190,7 @@ export function useAmazonListings(): ListingsState & { refresh: () => void } {
         }))
       }
     }
-  }, [])
+  }, [key])
 
   const refresh = useCallback(() => {
     void load()
@@ -207,13 +212,10 @@ export function useAmazonListings(): ListingsState & { refresh: () => void } {
 }
 
 export function useAmazonFinance(since: string = ALL_ORDERS_SINCE): FinanceState & { refresh: () => void } {
-  const [state, setState] = useState<FinanceState>({
-    status: 'inicial',
-    message: 'Lendo extrato financeiro…',
-    orders: {},
-    ads: [],
-    skus: [],
-    updatedAt: 0,
+  const key = `finance:${since}`
+  const [state, setState] = useState<FinanceState>(() => {
+    const cached = cacheGet<FinanceState>(key, DATA_CACHE_MS)
+    return cached ?? { status: 'inicial', message: 'Lendo extrato financeiro…', orders: {}, ads: [], skus: [], updatedAt: 0 }
   })
   const requestId = useRef(0)
 
@@ -221,6 +223,7 @@ export function useAmazonFinance(since: string = ALL_ORDERS_SINCE): FinanceState
     const id = (requestId.current += 1)
     try {
       const { finance } = await fetchAmazonFinance(since)
+      cacheSet(key, finance)
       if (id === requestId.current) setState(finance)
     } catch (error) {
       const failure = error instanceof FinanceError ? error : new FinanceError('erro', (error as Error).message)
@@ -234,7 +237,7 @@ export function useAmazonFinance(since: string = ALL_ORDERS_SINCE): FinanceState
         }))
       }
     }
-  }, [since])
+  }, [since, key])
 
   const refresh = useCallback(() => {
     void load()

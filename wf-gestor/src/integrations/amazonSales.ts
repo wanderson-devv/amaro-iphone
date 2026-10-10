@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Sale, SaleStatus } from '../data'
 import { proxyHint, readProxyUrl } from './amazon/connector'
+import { cacheGet, cacheSet } from './cache'
+
+const SALES_CACHE_MS = 10 * 60_000
 
 export type DetailedItem = { title?: string; sku?: string; asin?: string; qty: number; price: number }
 
@@ -131,11 +134,10 @@ export async function fetchAmazonSales(since: string): Promise<{ sales: Sale[]; 
 }
 
 export function useAmazonSales(since: string): AmazonSalesState & { refresh: () => void } {
-  const [state, setState] = useState<AmazonSalesState>({
-    status: 'inicial',
-    message: 'Lendo pedidos da Amazon…',
-    sales: [],
-    updatedAt: 0,
+  const key = `sales:${since}`
+  const [state, setState] = useState<AmazonSalesState>(() => {
+    const cached = cacheGet<AmazonSalesState>(key, SALES_CACHE_MS)
+    return cached ?? { status: 'inicial', message: 'Lendo pedidos da Amazon…', sales: [], updatedAt: 0 }
   })
   const requestId = useRef(0)
 
@@ -144,7 +146,9 @@ export function useAmazonSales(since: string): AmazonSalesState & { refresh: () 
 
     try {
       const { sales, detail } = await fetchAmazonSales(since)
-      if (id === requestId.current) setState({ status: 'live', message: detail, sales, updatedAt: Date.now() })
+      const next: AmazonSalesState = { status: 'live', message: detail, sales, updatedAt: Date.now() }
+      cacheSet(key, next)
+      if (id === requestId.current) setState(next)
     } catch (error) {
       const failure =
         error instanceof AmazonSalesError
@@ -160,7 +164,7 @@ export function useAmazonSales(since: string): AmazonSalesState & { refresh: () 
         }))
       }
     }
-  }, [since])
+  }, [since, key])
 
   const refresh = useCallback(() => {
     void load()

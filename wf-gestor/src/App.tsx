@@ -24,6 +24,7 @@ import { brl } from './data'
 import {
   describeSync,
   loadAppDb,
+  prefetchCoreData,
   startAutoSync,
   useAutoSyncStatus,
   useLiveSales,
@@ -128,6 +129,7 @@ export default function App() {
 
   useEffect(() => {
     void loadAppDb().finally(() => startAutoSync())
+    prefetchCoreData()
   }, [])
 
   const syncTone = sync.running

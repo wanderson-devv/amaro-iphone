@@ -10,6 +10,7 @@ export {
   useAppDbWriteError,
 } from './appDb'
 export type { AppDbState, SkuInfo } from './appDb'
+export { prefetchCoreData } from './prefetch'
 export {
   AmazonSpApiConnector,
   DEFAULT_PROXY_URL,
