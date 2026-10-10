@@ -554,10 +554,12 @@ export default function DashboardPage({
               <div key={item.channel} className="bar-row campaign">
                 <span>{item.channel}</span>
                 <div className="dual-track">
-                  <i className="bar-sales" style={{ width: `${item.share * 2}%` }} />
+                  <i className="bar-sales" style={{ width: `${Math.min(100, item.share)}%` }} />
                   <i
                     className="bar-spend"
-                    style={{ width: `${item.revenue > 0 ? (item.profit / item.revenue) * item.share * 2 : 0}%` }}
+                    style={{
+                      width: `${Math.min(100, item.revenue > 0 ? (item.profit / item.revenue) * item.share : 0)}%`,
+                    }}
                   />
                 </div>
                 <b>{pct(item.share, 0)}</b>
