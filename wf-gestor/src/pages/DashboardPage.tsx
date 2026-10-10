@@ -240,7 +240,8 @@ export default function DashboardPage({
         channel,
         revenue: value.revenue,
         profit: value.profit,
-        share: total > 0 ? Math.round((value.revenue / total) * 100) : 0,
+        share: total > 0 ? (value.revenue / total) * 100 : 0,
+        margin: value.revenue > 0 ? (value.profit / value.revenue) * 100 : 0,
       }))
       .sort((a, b) => b.revenue - a.revenue)
   }, [rows, hasProfit])
@@ -548,21 +549,37 @@ export default function DashboardPage({
           </div>
         </Panel>
 
-        <Panel title="Participação por canal" hint="Faturamento e lucro">
+        <Panel title="Faturamento e lucro por canal" hint="Valores e margem por canal">
+          {channelMix.length === 0 && <p className="breakdown-note">Sem vendas no recorte selecionado.</p>}
           <div className="bars">
             {channelMix.map((item) => (
               <div key={item.channel} className="bar-row campaign">
                 <span>{item.channel}</span>
+                <b>{brl(item.revenue)}</b>
                 <div className="dual-track">
                   <i className="bar-sales" style={{ width: `${Math.min(100, item.share)}%` }} />
-                  <i
-                    className="bar-spend"
-                    style={{
-                      width: `${Math.min(100, item.revenue > 0 ? (item.profit / item.revenue) * item.share : 0)}%`,
-                    }}
-                  />
                 </div>
-                <b>{pct(item.share, 0)}</b>
+                {hasProfit ? (
+                  <>
+                    <div className="bar-meta">
+                      <span>
+                        Lucro <b>{brl(item.profit)}</b> · Margem{' '}
+                        <b className={item.margin < 0 ? 'is-negative' : undefined}>{pct(item.margin)}</b>
+                      </span>
+                      <small>{pct(item.share, 0)} do faturamento</small>
+                    </div>
+                    <div className="dual-track">
+                      <i
+                        className={item.margin < 0 ? 'bar-loss' : 'bar-profit'}
+                        style={{ width: `${Math.min(100, Math.max(0, item.margin))}%` }}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="bar-meta">
+                    <span className="empty">Lucro e margem — informe o custo dos SKUs em Catálogo</span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -571,7 +588,7 @@ export default function DashboardPage({
               <i className="revenue-dot" /> Faturamento
             </span>
             <span>
-              <i className="profit-dot" /> Lucro
+              <i className="profit-dot" /> Margem (lucro/faturamento)
             </span>
             <span className="synced">{num(rows.length)} pedidos no recorte</span>
           </div>

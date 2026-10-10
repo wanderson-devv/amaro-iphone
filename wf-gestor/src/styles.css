@@ -288,10 +288,17 @@ tr.clickable { cursor: pointer; }
 .bar-d { background: linear-gradient(90deg, #033d21, var(--green-deep)); }
 
 .bar-row.campaign { grid-template-columns: 1fr auto; gap: 4px 8px; }
+.bar-row.campaign > b { color: var(--green-soft); }
 .dual-track { grid-column: 1 / -1; display: grid; gap: 3px; min-width: 0; overflow: hidden; }
 .dual-track i { display: block; max-width: 100%; height: 7px; border-radius: 5px; animation: grow 1s cubic-bezier(.2,.8,.3,1) both; transform-origin: left; }
 .bar-sales { background: linear-gradient(90deg, var(--green-deep), var(--green-soft)); }
-.bar-spend { background: linear-gradient(90deg, rgba(105, 240, 174, .55), rgba(167, 255, 214, .75)); }
+.bar-profit { background: linear-gradient(90deg, #35d98a, #b9ffe0); }
+.bar-loss { background: linear-gradient(90deg, #b84a2f, #ff9e80); }
+.bar-meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 8px; color: var(--muted); font-size: 10px; }
+.bar-meta b { color: var(--green-soft); font: 11px 'DM Mono', monospace; }
+.bar-meta b.is-negative { color: #ff9e80; }
+.bar-meta small { color: var(--faint); font: 9px 'DM Mono', monospace; }
+.bar-meta .empty { color: var(--faint); }
 .hint-text { color: var(--muted); font-size: 10px; line-height: 1.6; margin: 15px 0 0; }
 .indicator-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
 .indicator-grid div { background: rgba(255, 255, 255, .045); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 4px; }
