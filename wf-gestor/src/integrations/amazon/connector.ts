@@ -3,7 +3,7 @@ import { SyncError } from '../types'
 
 const STORE_KEY = 'wf.spApiProxy'
 const ENV_URL = (import.meta.env.VITE_SP_API_PROXY as string | undefined) ?? ''
-export const DEFAULT_PROXY_URL = 'http://127.0.0.1:8787'
+export const DEFAULT_PROXY_URL = 'https://wf-gestor-api.onrender.com'
 
 const normalize = (value: string) => value.trim().replace(/\/+$/, '')
 
@@ -20,8 +20,8 @@ export function readProxyUrl(): string {
 export function proxyHint(): string {
   const onSecurePage = typeof location !== 'undefined' && location.protocol === 'https:'
   return onSecurePage
-    ? `Sem resposta do proxy local em ${DEFAULT_PROXY_URL}. Libere o acesso à rede local quando o navegador pedir — em seguida os dados reais aparecem.`
-    : `Suba o proxy local com “npm run proxy” para usar dados reais.`
+    ? `Sem resposta do proxy em ${DEFAULT_PROXY_URL}. O serviço pode estar acordando (até ~30s) — recarregue em seguida.`
+    : `Sem resposta do proxy. Rode “npm run proxy” localmente ou use o proxy na nuvem (${DEFAULT_PROXY_URL}).`
 }
 
 export function writeProxyUrl(value: string) {

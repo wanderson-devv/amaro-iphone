@@ -1,0 +1,22 @@
+name: Keep Render Alive
+
+# Mante o servico no Render (free tier) sempre acordado.
+# O Render dorme apos ~15 min sem trafego; um ping a cada 10 min
+# chega antes desse limite e evita o cold start de ~30-50s.
+# O scheduler precisa ser externo ao proprio servico (repo publico
+# => GitHub Actions sem custo).
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        run: |
+          curl -fsS --max-time 60 https://wf-gestor-api.onrender.com/health \
+            && echo " OK" \
+            || { echo " ping falhou"; exit 1; }
